@@ -21,10 +21,10 @@ use crate::transcript::{
 };
 use crate::turn_state::{TurnLifecycle, TurnState};
 
-const MAX_GENERATIONS: u32 = 4096;
+pub(super) const MAX_GENERATIONS: u32 = 4096;
 
 /// Completed turns kept per thread, as the on-disk store keeps them.
-const COMPLETED_RETENTION: usize = 20;
+pub(super) const COMPLETED_RETENTION: usize = 20;
 
 /// A [`SessionStoreProvider`] keeping every agent's stores in memory, each
 /// agent's apart from every other's.
@@ -357,14 +357,14 @@ impl InMemoryTurnStates {
 }
 
 /// Newest first: by `started_at`, then `updated_at`.
-fn newest_first(a: &TurnState, b: &TurnState) -> Ordering {
+pub(super) fn newest_first(a: &TurnState, b: &TurnState) -> Ordering {
     compare_rfc3339(&b.started_at, &a.started_at)
         .then_with(|| compare_rfc3339(&b.updated_at, &a.updated_at))
 }
 
 /// Completed-turn retention follows completion time, as the durable store
 /// does. Listing the latest live turn still follows its start time.
-fn completed_newest_first(a: &TurnState, b: &TurnState) -> Ordering {
+pub(super) fn completed_newest_first(a: &TurnState, b: &TurnState) -> Ordering {
     compare_rfc3339(&b.updated_at, &a.updated_at)
         .then_with(|| compare_rfc3339(&b.started_at, &a.started_at))
 }
@@ -383,7 +383,7 @@ fn key(thread_id: &str, request_id: &str) -> (String, String) {
     (thread_id.to_string(), request_id.to_string())
 }
 
-fn is_terminal(state: &TurnState) -> bool {
+pub(super) fn is_terminal(state: &TurnState) -> bool {
     matches!(
         state.lifecycle,
         TurnLifecycle::Interrupted | TurnLifecycle::Completed

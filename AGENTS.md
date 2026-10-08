@@ -21,8 +21,10 @@ dedicated `types.rs` file and keep module-local unit tests in a sibling
 smallest useful API.
 
 Cargo features are package-local. `tinyagents-harness` exposes `sqlite`,
-`tools`, `multimodal`, and `tracing`; `tinyagents-graph` exposes `sqlite` and
-`tracing`; registry and session expose `tracing`. Tracing instrumentation is
+`tools`, `multimodal`, `storage-drivers`, and `tracing`; `tinyagents-graph`
+exposes `sqlite`, `storage-drivers`, and `tracing`; session exposes
+`storage-drivers` and `tracing`; registry exposes `tracing`. The
+`storage-drivers` features put each store on `tinystoragedrivers` ports. Tracing instrumentation is
 compiled out by default.
 
 Integration tests are in `crates/tinyagents-integration-tests/tests/`, covering serialization, graph routing,
