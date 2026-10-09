@@ -3,6 +3,8 @@
 //! checkpoint-namespace isolation — verifying that recursively nested and
 //! sibling embeddings accumulate distinct namespaces and never collide on
 //! checkpoint ids when sharing one checkpointer and thread.
+// The deprecated `SubAgentNode` keeps its behaviour and its coverage.
+#![allow(deprecated)]
 
 use std::collections::HashSet;
 use std::sync::Arc;

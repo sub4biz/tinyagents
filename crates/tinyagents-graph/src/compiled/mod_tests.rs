@@ -1,6 +1,8 @@
 //! Unit tests for the superstep executor: sequential and parallel runs,
 //! reducer fan-in ordering, conditional/command routing, checkpoint
 //! persistence, interrupt/resume, and recursion-limit enforcement.
+// The deprecated `SubAgentNode` keeps its behaviour and its coverage.
+#![allow(deprecated)]
 
 use super::*;
 use crate::builder::{GraphBuilder, GraphDefaults, NodeContext, Route};

@@ -1,5 +1,7 @@
 //! End-to-end coverage for graph sub-agent nodes through the public registry,
 //! harness, and graph execution surfaces.
+// The deprecated `SubAgentNode` keeps its behaviour and its coverage.
+#![allow(deprecated)]
 
 use std::collections::HashMap;
 use std::sync::Arc;

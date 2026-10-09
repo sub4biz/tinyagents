@@ -369,6 +369,7 @@ pub struct SubAgentNode<State, Update> {
     pub policy: SubAgentPolicy,
 }
 
+#[allow(deprecated)]
 impl<State, Update> Clone for SubAgentNode<State, Update> {
     fn clone(&self) -> Self {
         Self {
