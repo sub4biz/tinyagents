@@ -3,7 +3,7 @@
 Host-neutral vocabulary and helpers for background ("detached") subagents. The
 process-local mechanics (status watch channel, cancel token, abort handle,
 ownership) live in `tinyagents_tasks::DetachedTaskRegistry`; the
-durable lifecycle lives in an `orchestration::TaskStore`. This module sits
+durable lifecycle lives in an `tinyagents_tasks::TaskStore`. This module sits
 between them. Hosts own the registry instance, its metadata type, where the
 store lives, progress projection and policy.
 

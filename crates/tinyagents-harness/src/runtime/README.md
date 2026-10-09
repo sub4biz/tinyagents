@@ -89,7 +89,7 @@ enforcement — only how the turn gets *set up* differs.
 - `crate::context::RunContext` carries the crate-private
   `HostInvocationAuthority` for the duration of one invocation tree; only
   `runtime::agent` installs or reads it.
-- `crate::subagent` is the recursive delegation boundary: a sub-agent tool
+- `tinyagents_orchestration::subagent` is the recursive delegation boundary: a sub-agent tool
   invocation re-enters `invoke_agent_with_capabilities` /
   `invoke_agent_streaming_with_capabilities` with the parent's inherited
   authority rather than the plain `invoke_agent` entry point.

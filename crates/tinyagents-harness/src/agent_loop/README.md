@@ -4,7 +4,7 @@ The default model-tool-model agent loop: the innermost turn of the recursive
 harness.
 
 This loop is where one model call is driven to completion. Because a whole
-harness can be exposed as a tool (`harness::subagent::SubAgentTool`), the
+harness can be exposed as a tool (`tinyagents_orchestration::subagent::SubAgentTool`), the
 tools this loop executes may themselves be other agents — "a model calling a
 model" is just this loop nested inside one of its own tool calls. Each
 invocation runs inside a `RunContext` that tracks recursion depth, fans
