@@ -62,6 +62,8 @@ pub use types::{
     SubagentRunResult, SubagentTaskKey, SubagentTerminalPersistenceDisposition,
 };
 
+mod outcome_status_map;
+
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod test;
