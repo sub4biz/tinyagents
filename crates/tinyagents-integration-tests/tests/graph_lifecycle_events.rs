@@ -382,3 +382,109 @@ async fn a_checkpoint_resume_in_a_fresh_runtime_neither_reannounces_input_nor_du
         }
     }
 }
+
+/// A serial batch whose second call trips the tool cap with an error: the
+/// first call's result is already on the transcript and must be announced and
+/// counted by the closing `TurnCompleted`, as in the direct loop.
+#[tokio::test]
+async fn a_partially_executed_tool_batch_is_announced_when_the_batch_errors() {
+    let mut traces = Vec::new();
+    for execution in [LoopExecution::Direct, LoopExecution::Graph] {
+        let mut response = tool_call_response("a", "lookup");
+        response
+            .message
+            .tool_calls
+            .push(ToolCall::new("b", "lookup", json!({})));
+        let mut harness = harness_for(
+            execution,
+            vec![response, ModelResponse::assistant("done")],
+            RunLimits::default().with_max_tool_calls(1),
+        );
+        harness.register_tool(Arc::new(FakeTool::returning("lookup", "out")));
+        let recorder = EventRecorder::new();
+        let ctx = RunContext::new(RunConfig::new("partial"), ()).with_events(recorder.sink());
+        let result = harness
+            .invoke_in_context(&(), ctx, vec![Message::user("go")])
+            .await;
+        assert!(result.is_err(), "{execution:?}: the cap errors the run");
+        traces.push(lifecycle(&recorder.events()));
+    }
+    assert!(
+        traces[0].iter().any(|e| e == "append:2:tool:a"),
+        "{:?}",
+        traces[0]
+    );
+    assert_eq!(traces[1], traces[0]);
+}
+
+/// Approval interrupt raised after the tool batch: the batch's messages and
+/// its turn close are not left announced for a state the graph discards.
+#[tokio::test]
+async fn an_interrupt_after_the_tool_batch_retracts_instead_of_closing_the_turn() {
+    use tinyagents_graph::InMemoryCheckpointer;
+    use tinyagents_graph::agent_loop::{LoopRuntime, LoopState, compile_loop};
+    use tinyagents_harness::context::MiddlewareControl;
+
+    struct PauseAfterTools(std::sync::atomic::AtomicBool);
+
+    #[async_trait]
+    impl tinyagents_harness::middleware::Middleware<(), ()> for PauseAfterTools {
+        fn name(&self) -> &str {
+            "pause_after_tools"
+        }
+        fn should_stop_after_turn(&self, _: &mut RunContext<()>, _: &tinyagents_harness::middleware::AgentRun) -> bool {
+            false
+        }
+        async fn after_tool(
+            &self,
+            ctx: &mut RunContext<()>,
+            _state: &(),
+            _call: &ToolCall,
+            _result: &mut tinytools::ToolResult,
+        ) -> tinyagents_harness::Result<()> {
+            if self.0.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                ctx.request_control(MiddlewareControl::Interrupt {
+                    node: "review".into(),
+                    message: "needs approval".into(),
+                });
+            }
+            Ok(())
+        }
+    }
+
+    let mut harness: AgentHarness<()> = AgentHarness::new();
+    harness
+        .register_model(
+            "mock",
+            Arc::new(MockModel::with_responses(vec![
+                tool_call_response("c1", "lookup"),
+                ModelResponse::assistant("done"),
+            ])),
+        )
+        .set_default_model("mock")
+        .register_tool(Arc::new(FakeTool::returning("lookup", "out")))
+        .push_middleware(Arc::new(PauseAfterTools(
+            std::sync::atomic::AtomicBool::new(true),
+        )));
+    let recorder = EventRecorder::new();
+    let ctx = RunContext::new(RunConfig::new("pause-tools"), ()).with_events(recorder.sink());
+    let rt = Arc::new(LoopRuntime::for_run(Arc::new(harness), Arc::new(()), ctx));
+    let graph = compile_loop(rt)
+        .expect("compiles")
+        .with_checkpointer(Arc::new(InMemoryCheckpointer::<LoopState>::default()));
+    let first = graph
+        .run_with_thread("t", LoopState::seed(vec![Message::user("go")]))
+        .await
+        .expect("reaches the interrupt");
+    assert_eq!(first.interrupts.len(), 1);
+
+    let events = lifecycle(&recorder.events());
+    assert!(
+        !events.iter().any(|e| e.starts_with("turn.completed:1:c1")),
+        "a turn holding discarded tool results must not be reported complete: {events:?}"
+    );
+    assert!(
+        !events.iter().any(|e| e.starts_with("append:2:tool")) || recorder.kinds().contains(&"message.retracted".to_string()),
+        "{events:?}"
+    );
+}
