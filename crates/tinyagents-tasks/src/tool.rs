@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
-use crate::{Result, TinyAgentsError};
+use tinyagents_harness::error::{Result, TinyAgentsError};
 use tinyagents_harness::ids::{GraphId, TaskId, new_call_id, next_seq};
 use tinyagents_harness::steering::{SteeringCommand, SteeringHandle};
 use tinyagents_harness::tool::ToolRegistry;

@@ -37,5 +37,5 @@ pub use tool::{
 pub use types::*;
 
 #[cfg(test)]
-#[path = "mod_tests.rs"]
+#[path = "lib_tests.rs"]
 mod test;
