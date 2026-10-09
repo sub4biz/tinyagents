@@ -481,12 +481,11 @@ impl<C: Send + 'static, H: Send + 'static> SubagentDriver<C, H> {
         let result = self
             .persist(task_key, outcome, expected_pause, &cancellation)
             .await?;
-        if let (Some(router), Some(origin)) = (&self.completions, &completion_origin) {
-            if result.should_emit_host_effects() {
-                if let Some(record) = origin.record_for_outcome(&result.outcome) {
-                    deliver(router, record).await;
-                }
-            }
+        if let (Some(router), Some(origin)) = (&self.completions, &completion_origin)
+            && result.should_emit_host_effects()
+            && let Some(record) = origin.record_for_outcome(&result.outcome)
+        {
+            deliver(router, record).await;
         }
         Ok(result)
     }
