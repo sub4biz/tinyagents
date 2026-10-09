@@ -24,6 +24,8 @@ use tinyagents_session::run_ledger::{
     try_claim_workflow_run, upsert_workflow_run,
 };
 
+use super::child_step::run_child_step;
+use crate::subagent::AgentStepConfig;
 use super::state::{
     PhaseStatus, all_phases_completed, init_phase_states, next_runnable_phase, phase_prompt,
     reset_running_phases, set_phase_reason, set_phase_status, synthesize_summary, upstream_outputs,
@@ -198,6 +200,7 @@ pub struct WorkflowEngine<S, E> {
     event_sink: Option<Arc<dyn GraphEventSink>>,
     event_seq: AtomicU64,
     lease_for: Duration,
+    step_config: AgentStepConfig,
 }
 
 const WORKFLOW_LEASE: Duration = Duration::from_secs(10 * 60);
@@ -271,12 +274,24 @@ where
             event_sink: None,
             event_seq: AtomicU64::new(0),
             lease_for: WORKFLOW_LEASE,
+            step_config: AgentStepConfig::default(),
         }
     }
 
     /// Attach an optional host sink for ordinary graph lifecycle tracing.
     pub fn with_event_sink(mut self, sink: Arc<dyn GraphEventSink>) -> Self {
         self.event_sink = Some(sink);
+        self
+    }
+
+    /// Apply driver policy to every agent child: spawn admission (scoped per
+    /// workflow run), timeout/retry/budget, result policy and role.
+    ///
+    /// Without this call the config is inert and children run exactly as
+    /// before. A child refused by the spawn policy, timed out, or over budget
+    /// fails its phase with that reason.
+    pub fn with_step_config(mut self, config: AgentStepConfig) -> Self {
+        self.step_config = config;
         self
     }
 
@@ -566,6 +581,7 @@ where
             lease_for: self.lease_for,
         });
         let executor = self.executor.clone();
+        let step_config = self.step_config.clone();
         let worker_cancel = cancel.clone();
         let worker_registration = registration.clone();
         let outcomes = map_reduce(
@@ -578,9 +594,9 @@ where
                 let executor = executor.clone();
                 let cancel = worker_cancel.clone();
                 let registration = worker_registration.clone();
+                let step_config = step_config.clone();
                 async move {
-                    executor
-                        .execute(request, cancel, registration)
+                    run_child_step(&step_config, executor, request, cancel, registration)
                         .await
                         .map_err(|error| {
                             tinyagents_harness::TinyAgentsError::Graph(error.to_string())
@@ -873,7 +889,7 @@ where
     }
 }
 
-fn render_compat_output(output: &Value) -> String {
+pub(super) fn render_compat_output(output: &Value) -> String {
     match output {
         Value::String(text) => text.clone(),
         _ => serde_json::to_string(output)

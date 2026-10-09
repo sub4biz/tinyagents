@@ -5,6 +5,7 @@
 //! [`WorkflowStore`] and [`WorkflowExecutor`]; therefore this module has no
 //! knowledge of credentials, model selection, policy, progress, or RPC.
 
+mod child_step;
 mod engine;
 mod graph;
 mod state;
@@ -27,3 +28,7 @@ pub use validate::{validate_agents, validate_structure};
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "child_step_tests.rs"]
+mod child_step_tests;
