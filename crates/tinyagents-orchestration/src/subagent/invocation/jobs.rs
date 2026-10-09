@@ -65,6 +65,7 @@ impl SubAgentJobRegistry {
     }
 
     /// The detached-task registry that owns this registry's live state.
+    #[cfg(test)]
     pub(crate) fn tasks(&self) -> &DetachedTaskRegistry<JobMeta, SubAgentJob> {
         &self.tasks
     }
