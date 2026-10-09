@@ -543,3 +543,62 @@ async fn an_interrupt_after_the_tool_batch_retracts_instead_of_closing_the_turn(
     );
     assert_eq!(count("turn.started"), count("turn.completed"), "{events:?}");
 }
+
+/// `LoopIter` and `compile_loop` propagate a node error directly, with no
+/// driver epilogue: the nodes themselves close the turn they opened and
+/// announce what had been appended.
+#[tokio::test]
+async fn a_node_error_in_the_iterator_closes_its_turn_and_announces_partial_results() {
+    // Provider error in the model node.
+    let mut harness: AgentHarness<()> = AgentHarness::new();
+    harness
+        .register_model("mock", Arc::new(FailingModel))
+        .set_default_model("mock");
+    let recorder = EventRecorder::new();
+    let ctx = RunContext::new(RunConfig::new("model-error"), ()).with_events(recorder.sink());
+    let mut iter = Arc::new(harness)
+        .iter(Arc::new(()), ctx, vec![Message::user("go")])
+        .expect("iter starts");
+    assert!(iter.run_to_end().await.is_err());
+    let events = lifecycle(&recorder.events());
+    let count = |prefix: &str| events.iter().filter(|e| e.starts_with(prefix)).count();
+    assert_eq!(count("turn.started"), count("turn.completed"), "{events:?}");
+
+    // A serial batch whose second call trips the tool cap.
+    let mut response = tool_call_response("a", "lookup");
+    response
+        .message
+        .tool_calls
+        .push(ToolCall::new("b", "lookup", json!({})));
+    let mut harness = harness_for(
+        LoopExecution::Direct,
+        vec![response, ModelResponse::assistant("done")],
+        RunLimits::default().with_max_tool_calls(1),
+    );
+    harness.register_tool(Arc::new(FakeTool::returning("lookup", "out")));
+    let recorder = EventRecorder::new();
+    let ctx = RunContext::new(RunConfig::new("batch-error"), ()).with_events(recorder.sink());
+    let mut iter = Arc::new(harness)
+        .iter(Arc::new(()), ctx, vec![Message::user("go")])
+        .expect("iter starts");
+    assert!(iter.run_to_end().await.is_err());
+    let events = lifecycle(&recorder.events());
+    assert!(events.iter().any(|e| e == "append:2:tool:a"), "{events:?}");
+    assert!(
+        events.iter().any(|e| e == "turn.completed:1:a"),
+        "{events:?}"
+    );
+}
+
+struct FailingModel;
+
+#[async_trait]
+impl tinyinference_llm::model::ChatModel<()> for FailingModel {
+    async fn invoke(
+        &self,
+        _: &(),
+        _: tinyinference_llm::model::ModelRequest,
+    ) -> tinyinference_llm::Result<ModelResponse> {
+        Err(tinyinference_llm::Error::Model("boom".to_string()))
+    }
+}

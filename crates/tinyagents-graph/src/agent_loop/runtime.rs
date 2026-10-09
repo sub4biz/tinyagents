@@ -283,7 +283,7 @@ where
 /// The `model` node body: dispatches the request [`plan_node`] built,
 /// records usage, appends the assistant message, and routes to `tools` or
 /// `settle`.
-pub(crate) async fn model_node<State, Ctx>(
+async fn model_node_inner<State, Ctx>(
     harness: &AgentHarness<State, Ctx>,
     app_state: &State,
     ctx: &mut RunContext<Ctx>,
@@ -540,12 +540,63 @@ where
 /// the call site above without over-cloning it into `LoopState`.
 struct ModelOutcomeShadow<'a>(#[allow(dead_code)] &'a ModelResponse);
 
+/// The `model` node: [`model_node_inner`], closing the turn it opened if it
+/// fails. `GraphLoopDriver` closes on every exit as well, but `LoopIter` and
+/// the compiled graph propagate a node error with no epilogue.
+pub(crate) async fn model_node<State, Ctx>(
+    harness: &AgentHarness<State, Ctx>,
+    app_state: &State,
+    ctx: &mut RunContext<Ctx>,
+    run: &mut AgentRun,
+    status: &mut HarnessRunStatus,
+    loop_state: LoopState,
+) -> Result<NodeResult<LoopState>>
+where
+    State: Send + Sync,
+    Ctx: Send + Sync,
+{
+    let entry = loop_state.messages.clone();
+    let result = model_node_inner(harness, app_state, ctx, run, status, loop_state).await;
+    if result.is_err() {
+        phases::lifecycle_close_turn(harness, ctx, &entry);
+    }
+    result
+}
+
+/// The `tools` node: [`tools_node_inner`], announcing the results of calls that
+/// ran before a failure and closing the turn if it fails.
+pub(crate) async fn tools_node<State, Ctx>(
+    harness: &AgentHarness<State, Ctx>,
+    app_state: &State,
+    ctx: &mut RunContext<Ctx>,
+    run: &mut AgentRun,
+    status: &mut HarnessRunStatus,
+    loop_state: LoopState,
+) -> Result<NodeResult<LoopState>>
+where
+    State: Send + Sync,
+    Ctx: Send + Sync,
+{
+    let entry = loop_state.messages.clone();
+    let result = tools_node_inner(harness, app_state, ctx, run, status, loop_state).await;
+    if result.is_err() {
+        // A batch error leaves the partial transcript on the run.
+        let messages = if run.messages.len() > entry.len() {
+            &run.messages
+        } else {
+            &entry
+        };
+        phases::lifecycle_close_turn(harness, ctx, messages);
+    }
+    result
+}
+
 /// The `tools` node body: executes the batch [`model_node`] requested via
 /// [`phases::execute_tool_batch`] (the exact same admission /
 /// serial-or-concurrent execution / middleware pipeline the direct loop
 /// uses — see that function's docs), then routes back to `plan` for the next
 /// turn.
-pub(crate) async fn tools_node<State, Ctx>(
+async fn tools_node_inner<State, Ctx>(
     harness: &AgentHarness<State, Ctx>,
     app_state: &State,
     ctx: &mut RunContext<Ctx>,

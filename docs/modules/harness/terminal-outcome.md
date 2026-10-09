@@ -52,10 +52,11 @@ real results. A fresh runtime resuming from a checkpoint continues the turn
 numbering from the checkpoint and re-opens the in-flight tool turn (without a
 second `TurnStarted`).
 
-Known differences from the direct loop: the graph rendition closes a turn before
-an output-retry prompt is announced (the direct loop announces the prompt first),
-and `LoopIter` / `compile_loop` do not close an open turn when a node errors
-(`GraphLoopDriver` does, on every exit).
+Known difference from the direct loop: the graph rendition closes a turn before
+an output-retry prompt is announced (the direct loop announces the prompt first).
+A model or tools node that fails closes the turn it opened (and announces the
+results of calls that ran before the failure), so `LoopIter` and `compile_loop`
+need no driver epilogue.
 
 ## `provider_started` and summarizers
 
