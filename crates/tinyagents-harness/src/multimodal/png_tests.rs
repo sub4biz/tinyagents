@@ -24,6 +24,7 @@ fn fixture() -> Vec<u8> {
     out
 }
 
+#[cfg(feature = "png-optimize")]
 fn decoded(bytes: &[u8]) -> Vec<u8> {
     let mut reader = ::png::Decoder::new(std::io::Cursor::new(bytes))
         .read_info()
@@ -34,6 +35,7 @@ fn decoded(bytes: &[u8]) -> Vec<u8> {
     pixels
 }
 
+#[cfg(feature = "png-optimize")]
 #[test]
 fn png_derivative_is_smaller_preserves_hidden_rgb_and_metadata_and_original() {
     let original = fixture();
@@ -56,6 +58,7 @@ fn png_derivative_is_smaller_preserves_hidden_rgb_and_metadata_and_original() {
     assert!(optimize_png_lossless(&optimized).is_none());
 }
 
+#[cfg(feature = "png-optimize")]
 #[test]
 fn animation_malformed_non_png_and_excessive_dimensions_are_skipped() {
     assert!(optimize_png_lossless(b"jpeg").is_none());
@@ -77,4 +80,27 @@ fn animation_malformed_non_png_and_excessive_dimensions_are_skipped() {
     let mut giant = fixture();
     giant[16..20].copy_from_slice(&u32::MAX.to_be_bytes());
     assert!(optimize_png_lossless(&giant).is_none());
+}
+
+#[test]
+fn non_png_input_is_skipped_in_every_configuration() {
+    assert!(optimize_png_lossless(b"jpeg").is_none());
+    assert!(optimize_png_lossless(b"\x89PNG\r\n\x1a\n").is_none());
+}
+
+// Without `png-optimize` the helper is a passthrough signal: `None` even for a
+// valid, compressible PNG, so callers keep (and size-check) the original.
+#[cfg(not(feature = "png-optimize"))]
+#[test]
+fn valid_png_is_passed_through_without_the_feature() {
+    let mut out = Vec::new();
+    {
+        let mut encoder = ::png::Encoder::new(&mut out, 64, 64);
+        encoder.set_color(::png::ColorType::Rgba);
+        encoder.set_depth(::png::BitDepth::Eight);
+        encoder.set_compression(::png::Compression::Fast);
+        let mut writer = encoder.write_header().unwrap();
+        writer.write_image_data(&vec![0u8; 64 * 64 * 4]).unwrap();
+    }
+    assert!(optimize_png_lossless(&out).is_none());
 }

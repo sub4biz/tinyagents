@@ -145,6 +145,8 @@ PNG derivatives use `optimize_png_lossless`: it changes only IDAT compression
 and filtering, preserving pixel format, hidden RGB, interlacing and every other
 chunk byte-for-byte. Animated, malformed and oversized inputs are skipped; the
 caller retains the original and decides where to store the optional smaller copy.
+The optimizer (`oxipng`) is behind the opt-in `png-optimize` feature; without it
+`optimize_png_lossless` always returns `None`, i.e. the original is kept as is.
 
 ZIP admission conservatively rejects footer signature bytes in central-directory
 metadata or archive comments, even where ZIP permits those bytes. This prevents
