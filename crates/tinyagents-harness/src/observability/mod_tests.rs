@@ -46,6 +46,7 @@ async fn in_memory_journal_append_read_round_trip() {
         1,
         AgentEvent::RunCompleted {
             run_id: RunId::new("run-1"),
+            outcome: None,
         },
     );
 
@@ -130,6 +131,7 @@ fn agent_latency_metrics_include_model_tool_and_run_elapsed() {
             "run-latency",
             50,
             AgentEvent::ToolStarted {
+                parent_call_id: None,
                 call_id: tool_id.clone(),
                 tool_name: "lookup".to_string(),
                 input: None,
@@ -139,6 +141,7 @@ fn agent_latency_metrics_include_model_tool_and_run_elapsed() {
             "run-latency",
             75,
             AgentEvent::ToolCompleted {
+                parent_call_id: None,
                 call_id: tool_id.clone(),
                 tool_name: "lookup".to_string(),
                 started_at_ms: None,
@@ -155,6 +158,7 @@ fn agent_latency_metrics_include_model_tool_and_run_elapsed() {
             90,
             AgentEvent::RunCompleted {
                 run_id: run_id.clone(),
+                outcome: None,
             },
         ),
     ];
@@ -239,6 +243,7 @@ async fn journal_window_and_filter_reads() {
             2,
             AgentEvent::RunCompleted {
                 run_id: RunId::new("run-1"),
+                outcome: None,
             },
         ))
         .await
@@ -567,6 +572,7 @@ fn redacting_sink_masks_secret_substrings() {
         event: AgentEvent::RunFailed {
             run_id: RunId::new("run-r"),
             error: "auth failed with key sk-SUPERSECRET and pw hunter2".to_string(),
+            outcome: None,
         },
     });
 
@@ -623,6 +629,7 @@ fn redacting_sink_empty_secrets_forwards_unchanged() {
         event: AgentEvent::RunFailed {
             run_id: RunId::new("run-r"),
             error: "nothing to redact here".to_string(),
+            outcome: None,
         },
     });
 

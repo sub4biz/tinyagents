@@ -614,3 +614,18 @@ async fn bounded_returns_cancelled_when_the_run_is_cancelled_before_the_future_r
         Err(crate::error::TinyAgentsError::Cancelled)
     ));
 }
+
+#[test]
+fn a_cleared_limit_kind_is_not_attributed_to_a_later_error() {
+    use crate::events::{AgentEvent, LimitKind};
+    let ctx: RunContext<()> = RunContext::new(RunConfig::new("run-limit-cache"), ());
+    ctx.emit(AgentEvent::LimitReached {
+        kind: LimitKind::ToolCalls,
+    });
+    ctx.clear_last_limit();
+    assert_eq!(ctx.take_last_limit(), None);
+    ctx.emit(AgentEvent::LimitReached {
+        kind: LimitKind::ModelCalls,
+    });
+    assert_eq!(ctx.take_last_limit(), Some(LimitKind::ModelCalls));
+}

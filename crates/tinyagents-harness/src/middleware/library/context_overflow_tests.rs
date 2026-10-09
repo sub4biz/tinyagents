@@ -507,6 +507,249 @@ async fn when_truncation_cannot_cover_the_overflow_it_follows_the_compaction() {
     assert!(tool_text_len(requests.last().unwrap()) < 3_000);
 }
 
+/// A summary of a fixed size.
+struct SizedSummarizer(usize);
+
+#[async_trait]
+impl Summarizer for SizedSummarizer {
+    async fn summarize(&self, _messages: &[Message]) -> Result<SummaryRecord> {
+        Ok(record(&"s".repeat(self.0)))
+    }
+}
+
+#[tokio::test]
+async fn a_compaction_is_judged_against_the_truncated_request_actually_sent() {
+    // Truncation engages first (the retry carries a 200-byte result). A later
+    // compaction whose summary is smaller than the raw 40 KB result but larger
+    // than what is now sent would grow the outgoing request: it is refused.
+    let base = ScriptedBase::new(|_, _| Err(TinyAgentsError::Model(OVERFLOW_BY_2900.to_string())));
+    let stack = stack_of(
+        ContextCompressionMiddleware::with_summarizer(
+            roomy_policy(),
+            Box::new(SizedSummarizer(12_000)),
+        )
+        .with_tool_result_truncation(200),
+    );
+    let recorder = Arc::new(RecordingListener::new());
+    let mut c = ctx();
+    c.events.subscribe(recorder.clone());
+    let mut messages = long_transcript();
+    messages.extend(call_and_result("c1", 40_000));
+    let result = stack
+        .run_wrapped_model(
+            &mut c,
+            &(),
+            ModelRequest {
+                messages,
+                ..Default::default()
+            },
+            &base,
+        )
+        .await;
+    assert!(result.is_err());
+    assert_eq!(compacted_count(&recorder), 0, "no growing compaction");
+    // The first request is the raw one; every retry after truncation engaged
+    // carries the cut result.
+    for request in base.requests.lock().unwrap().iter().skip(1) {
+        assert!(tool_text_len(request) < 3_000);
+    }
+}
+
+#[tokio::test]
+async fn a_response_discarded_for_the_truncation_fallback_is_still_accounted() {
+    // Nothing to compact (one user message and one tool exchange), so the
+    // mixed route falls back to cutting the tool results: the discarded
+    // response was billed and its usage must be recorded.
+    let base = ScriptedBase::new(|n, _| {
+        let tokens = if n == 1 { 9_000 } else { 50 };
+        Ok(response(Some(input_usage(tokens, 20)), Some("stop")))
+    });
+    let stack = stack_of(
+        ContextCompressionMiddleware::with_summarizer(
+            truncating_policy(),
+            Box::new(ShortSummarizer::default()),
+        )
+        .with_response_overflow_detection(ResponseOverflowDetection::Usage)
+        .with_before_compaction(|_| crate::summarization::CompactionDecision::Decline)
+        .with_tool_result_truncation(400),
+    );
+    let mut messages = vec![user("read it")];
+    messages.extend(call_and_result("c1", 10_000));
+    let mut c = ctx();
+    let response = stack
+        .run_wrapped_model(
+            &mut c,
+            &(),
+            ModelRequest {
+                messages,
+                ..Default::default()
+            },
+            &base,
+        )
+        .await
+        .unwrap()
+        .into_response();
+    assert_eq!(response.usage.unwrap().input_tokens, 50);
+    assert_eq!(base.calls(), 2);
+    let discarded = c.take_discarded_usage();
+    assert_eq!(discarded.len(), 1, "the first response's usage is kept");
+    assert_eq!(discarded[0].input_tokens, 9_000);
+}
+
+#[tokio::test]
+async fn the_mixed_route_cuts_the_newest_result_again_after_compacting() {
+    // Truncation alone cannot reach the trigger, so the request is compacted;
+    // the compaction splice rebuilds it from the untruncated transcript, and
+    // the newest (otherwise spared) oversized result must be cut again.
+    let summarizer = ShortSummarizer::default();
+    let mw = ContextCompressionMiddleware::with_summarizer(
+        truncating_policy(),
+        Box::new(summarizer.clone()),
+    )
+    .with_keep_recent_tokens(3_000)
+    .with_tool_result_truncation(400);
+    let mut messages = long_transcript();
+    messages.extend(long_transcript());
+    messages.extend(long_transcript());
+    messages.extend(call_and_result("c1", 10_000));
+    let mut request = ModelRequest {
+        messages,
+        ..Default::default()
+    };
+    let mut c = ctx();
+    let epoch = c.prompt_prefix_epoch();
+    Middleware::<(), ()>::before_model(&mw, &mut c, &(), &mut request)
+        .await
+        .unwrap();
+    assert!(*summarizer.calls.lock().unwrap() >= 1, "it compacted");
+    assert!(
+        request
+            .messages
+            .iter()
+            .any(|m| matches!(m, Message::Tool(_))),
+        "the result stayed in the kept tail"
+    );
+    assert!(tool_text_len(&request) < 1_000, "and the result is cut");
+    assert_ne!(
+        c.prompt_prefix_epoch(),
+        epoch,
+        "the compaction and its cut declare the rewritten prefix"
+    );
+}
+
+#[tokio::test]
+async fn a_truncation_route_that_falls_short_still_cuts_the_result_after_compacting() {
+    // The route estimate (bare chars / 4) says cutting the result is enough,
+    // but the measured request (per-message framing over many tiny messages)
+    // is still over the trigger, so it compacts. The splice rebuilds the
+    // request from the untruncated transcript and must cut the result again.
+    let summarizer = ShortSummarizer::default();
+    let mw = ContextCompressionMiddleware::with_summarizer(
+        truncating_policy(),
+        Box::new(summarizer.clone()),
+    )
+    .with_keep_recent_tokens(3_000)
+    .with_tool_result_truncation(400);
+    let mut messages: Vec<Message> = (0..500)
+        .map(|i| {
+            if i % 2 == 0 {
+                user("a")
+            } else {
+                Message::assistant("b")
+            }
+        })
+        .collect();
+    messages.extend(call_and_result("c1", 10_000));
+    let mut request = ModelRequest {
+        messages,
+        ..Default::default()
+    };
+    let mut c = ctx();
+    Middleware::<(), ()>::before_model(&mw, &mut c, &(), &mut request)
+        .await
+        .unwrap();
+    assert!(*summarizer.calls.lock().unwrap() >= 1, "it compacted");
+    assert!(
+        request
+            .messages
+            .iter()
+            .any(|m| matches!(m, Message::Tool(_))),
+        "the result stayed in the kept tail"
+    );
+    assert!(tool_text_len(&request) < 1_000, "and the result is cut");
+}
+
+#[tokio::test]
+async fn the_mixed_route_reports_the_size_of_the_request_after_the_final_cut() {
+    let mw = ContextCompressionMiddleware::with_summarizer(
+        truncating_policy(),
+        Box::new(ShortSummarizer::default()),
+    )
+    .with_keep_recent_tokens(3_000)
+    .with_tool_result_truncation(400);
+    let mut messages = long_transcript();
+    messages.extend(long_transcript());
+    messages.extend(long_transcript());
+    messages.extend(call_and_result("c1", 10_000));
+    let mut request = ModelRequest {
+        messages,
+        ..Default::default()
+    };
+    let recorder = Arc::new(RecordingListener::new());
+    let mut c = ctx();
+    c.events.subscribe(recorder.clone());
+    Middleware::<(), ()>::before_model(&mw, &mut c, &(), &mut request)
+        .await
+        .unwrap();
+    let sent = crate::token_estimation::count_tokens_approximately(&request.messages);
+    let reported: Vec<u64> = recorder
+        .events()
+        .into_iter()
+        .filter_map(|r| match r.event {
+            AgentEvent::Compressed { to_tokens, .. } => Some(to_tokens),
+            _ => None,
+        })
+        .collect();
+    assert!(reported.contains(&sent), "{reported:?} vs sent {sent}");
+}
+
+#[tokio::test]
+async fn aging_out_an_oversized_result_moves_the_prefix_epoch_only_when_it_cuts() {
+    let mw =
+        ContextCompressionMiddleware::new(truncating_policy()).with_tool_result_truncation(400);
+    let mut messages = vec![user("read it")];
+    messages.extend(call_and_result("c1", 10_000));
+    let mut c = ctx();
+    let mut first = ModelRequest {
+        messages: messages.clone(),
+        ..Default::default()
+    };
+    Middleware::<(), ()>::before_model(&mw, &mut c, &(), &mut first)
+        .await
+        .unwrap();
+    messages.push(Message::assistant("noted"));
+    messages.push(user("and then?"));
+    let epoch = c.prompt_prefix_epoch();
+    let mut second = ModelRequest {
+        messages: messages.clone(),
+        ..Default::default()
+    };
+    Middleware::<(), ()>::before_model(&mw, &mut c, &(), &mut second)
+        .await
+        .unwrap();
+    assert_ne!(c.prompt_prefix_epoch(), epoch, "the rewrite was declared");
+    // A request with nothing left to cut leaves the epoch alone.
+    let epoch = c.prompt_prefix_epoch();
+    let mut small = ModelRequest {
+        messages: vec![user("hi")],
+        ..Default::default()
+    };
+    Middleware::<(), ()>::before_model(&mw, &mut c, &(), &mut small)
+        .await
+        .unwrap();
+    assert_eq!(c.prompt_prefix_epoch(), epoch);
+}
+
 // ── preemptive route (before_model) ───────────────────────────────────────────
 
 fn truncating_policy() -> SummarizationPolicy {

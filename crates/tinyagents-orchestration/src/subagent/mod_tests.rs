@@ -155,11 +155,11 @@ impl SubagentExecutor<String> for FakeExecutor {
         let status = match self.mode {
             ExecutorMode::Completed
             | ExecutorMode::WaitForCancellation
-            | ExecutorMode::CancelAfterExecution => SubagentStatus::Completed,
+            | ExecutorMode::CancelAfterExecution => SubagentOutcomeKind::Completed,
             ExecutorMode::Incomplete => {
-                SubagentStatus::Incomplete(SubagentIncomplete::new("budget exhausted"))
+                SubagentOutcomeKind::Incomplete(SubagentIncomplete::new("budget exhausted"))
             }
-            ExecutorMode::Pause => SubagentStatus::AwaitingInput(SubagentPause {
+            ExecutorMode::Pause => SubagentOutcomeKind::AwaitingInput(SubagentPause {
                 reason: "need approval".into(),
                 resume: SubagentResume::default(),
             }),
@@ -251,7 +251,7 @@ impl SubagentPersistence for FakePersistence {
             match pauses.get(&pause.key) {
                 None if pause.replaces.is_none() => {
                     let resume = match &pause.outcome.status {
-                        SubagentStatus::AwaitingInput(pause) => pause.resume.clone(),
+                        SubagentOutcomeKind::AwaitingInput(pause) => pause.resume.clone(),
                         _ => unreachable!("fake only persists awaiting outcomes"),
                     };
                     *self.saved_pause.lock().unwrap() = Some(resume);
@@ -262,13 +262,13 @@ impl SubagentPersistence for FakePersistence {
                     if pause.replaces.as_ref().is_some_and(|expected| {
                         matches!(
                             &current.status,
-                            SubagentStatus::AwaitingInput(current_pause)
+                            SubagentOutcomeKind::AwaitingInput(current_pause)
                                 if current_pause.resume == *expected
                         )
                     }) =>
                 {
                     let resume = match &pause.outcome.status {
-                        SubagentStatus::AwaitingInput(pause) => pause.resume.clone(),
+                        SubagentOutcomeKind::AwaitingInput(pause) => pause.resume.clone(),
                         _ => unreachable!("fake only persists awaiting outcomes"),
                     };
                     *self.saved_pause.lock().unwrap() = Some(resume);
@@ -290,10 +290,10 @@ impl SubagentPersistence for FakePersistence {
             .lock()
             .unwrap()
             .push(Action::Terminal(match outcome.status {
-                SubagentStatus::Completed => SubagentStatusName::Completed,
-                SubagentStatus::Incomplete(_) => SubagentStatusName::Incomplete,
-                SubagentStatus::Cancelled => SubagentStatusName::Cancelled,
-                SubagentStatus::AwaitingInput(_) => unreachable!(),
+                SubagentOutcomeKind::Completed => SubagentStatusName::Completed,
+                SubagentOutcomeKind::Incomplete(_) => SubagentStatusName::Incomplete,
+                SubagentOutcomeKind::Cancelled => SubagentStatusName::Cancelled,
+                SubagentOutcomeKind::AwaitingInput(_) => unreachable!(),
             }));
         self.keys.lock().unwrap().push(key.clone());
         if self.terminal_error {
@@ -306,7 +306,7 @@ impl SubagentPersistence for FakePersistence {
                 !replaces.is_some_and(|expected| {
                     matches!(
                         &paused.status,
-                        SubagentStatus::AwaitingInput(pause) if pause.resume == *expected
+                        SubagentOutcomeKind::AwaitingInput(pause) if pause.resume == *expected
                     )
                 })
             }) {
@@ -481,7 +481,7 @@ impl SubagentExecutor<String> for MismatchedExecutor {
             task_id: "other-task".into(),
             output: String::new(),
             history: Vec::new(),
-            status: SubagentStatus::Completed,
+            status: SubagentOutcomeKind::Completed,
             usage: UsageTotals::default(),
             artifacts: Vec::new(),
             schema_error: None,
@@ -521,7 +521,7 @@ impl SubagentExecutor<String> for PauseThenCompleteExecutor {
             },
             history: Vec::new(),
             status: if call == 1 {
-                SubagentStatus::AwaitingInput(SubagentPause {
+                SubagentOutcomeKind::AwaitingInput(SubagentPause {
                     reason: "need input".into(),
                     resume: SubagentResume {
                         checkpoint: Some("resume-token".into()),
@@ -529,7 +529,7 @@ impl SubagentExecutor<String> for PauseThenCompleteExecutor {
                     },
                 })
             } else {
-                SubagentStatus::Completed
+                SubagentOutcomeKind::Completed
             },
             usage: UsageTotals::default(),
             artifacts: Vec::new(),
@@ -575,7 +575,7 @@ impl SubagentExecutor<String> for NestedExecutor {
                 task_id,
                 output: "parent result".into(),
                 history: Vec::new(),
-                status: SubagentStatus::Completed,
+                status: SubagentOutcomeKind::Completed,
                 // This models the host's parent-visible roll-up: the child is
                 // added once alongside the parent's own model call.
                 usage: UsageTotals {
@@ -591,7 +591,7 @@ impl SubagentExecutor<String> for NestedExecutor {
             task_id,
             output: "child result".into(),
             history: Vec::new(),
-            status: SubagentStatus::Completed,
+            status: SubagentOutcomeKind::Completed,
             usage: UsageTotals {
                 calls: 7,
                 ..UsageTotals::default()
@@ -636,7 +636,7 @@ async fn prepared_context_identity_reaches_executor() {
         .await
         .unwrap();
 
-    assert_eq!(outcome.outcome.status, SubagentStatus::Completed);
+    assert_eq!(outcome.outcome.status, SubagentOutcomeKind::Completed);
     assert_eq!(*executor.context_ids.lock().unwrap(), vec![expected]);
 }
 
@@ -966,11 +966,11 @@ async fn concurrent_same_task_calls_coalesce_to_one_lifecycle() {
 
     assert_eq!(
         first.await.unwrap().unwrap().outcome.status,
-        SubagentStatus::Cancelled
+        SubagentOutcomeKind::Cancelled
     );
     assert_eq!(
         second.await.unwrap().unwrap().outcome.status,
-        SubagentStatus::Cancelled
+        SubagentOutcomeKind::Cancelled
     );
     assert_eq!(*planner.calls.lock().unwrap(), 1);
     assert_eq!(*executor.calls.lock().unwrap(), 1);
@@ -1016,7 +1016,10 @@ async fn cancelled_follower_returns_without_cancelling_the_leader_or_persisting(
         .expect("cancelled follower must not wait for the leader")
         .unwrap()
         .unwrap();
-    assert_eq!(follower_outcome.outcome.status, SubagentStatus::Cancelled);
+    assert_eq!(
+        follower_outcome.outcome.status,
+        SubagentOutcomeKind::Cancelled
+    );
     assert_eq!(
         follower_outcome.disposition,
         SubagentPersistenceDisposition::ObserverCancelled
@@ -1029,7 +1032,7 @@ async fn cancelled_follower_returns_without_cancelling_the_leader_or_persisting(
     leader_cancellation.cancel();
     assert_eq!(
         leader.await.unwrap().unwrap().outcome.status,
-        SubagentStatus::Cancelled
+        SubagentOutcomeKind::Cancelled
     );
     assert_eq!(persistence.outcomes.lock().unwrap().len(), 1);
 }
@@ -1066,7 +1069,7 @@ async fn dropped_leader_releases_its_in_flight_reservation() {
     .expect("replacement leader must not wait on an abandoned reservation")
     .unwrap();
 
-    assert_eq!(result.outcome.status, SubagentStatus::Cancelled);
+    assert_eq!(result.outcome.status, SubagentOutcomeKind::Cancelled);
     assert_eq!(*planner.calls.lock().unwrap(), 1);
 }
 
@@ -1143,9 +1146,9 @@ async fn awaiting_input_is_not_cached_and_the_next_call_resumes_to_completion() 
 
     assert!(matches!(
         first.outcome.status,
-        SubagentStatus::AwaitingInput(_)
+        SubagentOutcomeKind::AwaitingInput(_)
     ));
-    assert_eq!(second.outcome.status, SubagentStatus::Completed);
+    assert_eq!(second.outcome.status, SubagentOutcomeKind::Completed);
     assert_eq!(*planner.calls.lock().unwrap(), 2);
     assert_eq!(*executor.calls.lock().unwrap(), 2);
     assert_eq!(*planner.seen_resumes.lock().unwrap(), vec![false, true]);
@@ -1190,7 +1193,7 @@ async fn continuation_keeps_original_key_with_a_fresh_owned_context() {
         )
         .await
         .unwrap();
-    assert_eq!(completed.outcome.status, SubagentStatus::Completed);
+    assert_eq!(completed.outcome.status, SubagentOutcomeKind::Completed);
     assert_eq!(*planner.seen_resumes.lock().unwrap(), vec![false, true]);
     assert!(
         persistence
@@ -1223,7 +1226,7 @@ async fn driver_replaces_prepared_context_cancellation_with_execution_token() {
     cancellation.cancel();
     let outcome = task.await.unwrap().unwrap();
 
-    assert_eq!(outcome.outcome.status, SubagentStatus::Cancelled);
+    assert_eq!(outcome.outcome.status, SubagentOutcomeKind::Cancelled);
     assert!(executor.context_cancellations.lock().unwrap()[0].is_cancelled());
 }
 
@@ -1268,7 +1271,7 @@ async fn cancellation_before_persistence_commit_records_only_cancelled_terminal(
             .unwrap()
             .unwrap();
 
-        assert_eq!(outcome.outcome.status, SubagentStatus::Cancelled);
+        assert_eq!(outcome.outcome.status, SubagentOutcomeKind::Cancelled);
         assert_eq!(
             outcome.disposition,
             SubagentPersistenceDisposition::TerminalInserted
@@ -1276,7 +1279,7 @@ async fn cancellation_before_persistence_commit_records_only_cancelled_terminal(
         assert_eq!(persistence.outcomes.lock().unwrap().len(), 1);
         assert_eq!(
             persistence.outcomes.lock().unwrap()[0].status,
-            SubagentStatus::Cancelled
+            SubagentOutcomeKind::Cancelled
         );
     }
 }
@@ -1353,7 +1356,7 @@ async fn cancellation_before_execution_records_one_truthful_terminal() {
         .await
         .unwrap();
 
-    assert_eq!(outcome.outcome.status, SubagentStatus::Cancelled);
+    assert_eq!(outcome.outcome.status, SubagentOutcomeKind::Cancelled);
     assert_eq!(*planner.calls.lock().unwrap(), 0);
     assert_eq!(*executor.calls.lock().unwrap(), 0);
     assert_eq!(
@@ -1382,7 +1385,7 @@ async fn cancellation_during_execution_is_truthful_and_terminal_once() {
     cancellation.cancel();
     let outcome = task.await.unwrap().unwrap();
 
-    assert_eq!(outcome.outcome.status, SubagentStatus::Cancelled);
+    assert_eq!(outcome.outcome.status, SubagentOutcomeKind::Cancelled);
     assert_eq!(*executor.calls.lock().unwrap(), 1);
     assert_eq!(
         actions.lock().unwrap().last(),
@@ -1398,7 +1401,7 @@ async fn cancellation_after_execution_preserves_lossless_result_data() {
         .await
         .unwrap();
 
-    assert_eq!(outcome.outcome.status, SubagentStatus::Cancelled);
+    assert_eq!(outcome.outcome.status, SubagentOutcomeKind::Cancelled);
     assert_eq!(outcome.outcome.output, "result");
     assert_eq!(outcome.outcome.history, vec![Message::assistant("result")]);
     assert_eq!(outcome.outcome.usage.calls, 7);

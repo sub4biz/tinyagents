@@ -183,19 +183,23 @@ impl ToolSurface {
         messages: &mut Vec<Message>,
         host_allows: &(dyn Fn(&str) -> bool + Sync),
         patch_profile: Option<&tinyinference_llm::model::ModelProfile>,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         if harness.toolset.is_none() {
-            return Ok(());
+            return Ok(false);
         }
         let live_schemas = harness.direct_tool_schemas(ctx, host_allows).await?;
+        let mut rewrote = false;
         if let Some(patch) = tool_changes::diff_tool_set(&self.declared_tool_schemas, &live_schemas)
         {
             let in_place = tool_changes::patch_inserts_in_place(patch_profile);
             tool_changes::apply_tool_change_patch(messages, patch, in_place);
+            // A mid-conversation patch is an ordinary append; the folded or
+            // front-inserted form rewrites the transcript in place.
+            rewrote = !in_place;
             self.declared_tool_schemas = live_schemas.clone();
             self.direct_tool_schemas = live_schemas;
         }
-        Ok(())
+        Ok(rewrote)
     }
 
     /// Promotes only names returned by a successful intrinsic search. The patch
@@ -205,18 +209,20 @@ impl ToolSurface {
         &mut self,
         messages: &mut Vec<Message>,
         patch_profile: Option<&tinyinference_llm::model::ModelProfile>,
-    ) {
+    ) -> bool {
         let newly_promoted: Vec<ToolSchema> = self
             .promoted_names
             .difference(&self.recorded_promotions)
             .filter_map(|name| self.deferred_catalog.get(name).cloned())
             .collect();
         if newly_promoted.is_empty() {
-            return;
+            return false;
         }
+        let mut rewrote = false;
         if let Some(patch) = tool_changes::diff_tool_set(&[], &newly_promoted) {
             let in_place = tool_changes::patch_inserts_in_place(patch_profile);
             tool_changes::apply_tool_change_patch(messages, patch, in_place);
+            rewrote = !in_place;
         }
         self.recorded_promotions
             .extend(newly_promoted.iter().map(|schema| schema.name.clone()));
@@ -225,6 +231,7 @@ impl ToolSurface {
                 .into_iter()
                 .map(|schema| (schema.name.clone(), schema)),
         );
+        rewrote
     }
 
     /// Rebuilds the turn's wire list: the direct set, then promoted tools not

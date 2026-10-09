@@ -99,11 +99,21 @@ impl VerifyBeforeFinishMiddleware {
         if !response.tool_calls().is_empty() {
             return Some("not_final");
         }
+        // Truncation first: a reasoning model that spends its whole output
+        // budget on the hidden channel returns `length` with no text at all.
+        // Reported as `empty_answer` that reads like the model declining to
+        // answer; it is a call that produced nothing after running out of
+        // room, and the two call for different responses from whoever reads
+        // the log.
+        if crate::finish_reason::is_length_stop(response.finish_reason.as_deref()) {
+            return Some(if response.text().trim().is_empty() {
+                "truncated_before_any_output"
+            } else {
+                "truncated"
+            });
+        }
         if response.text().trim().is_empty() {
             return Some("empty_answer");
-        }
-        if crate::finish_reason::is_length_stop(response.finish_reason.as_deref()) {
-            return Some("truncated");
         }
         if response.continue_turn.is_some() {
             return Some("already_continued");
@@ -244,6 +254,11 @@ impl<S: Send + Sync, C: Send + Sync> Middleware<S, C> for VerifyBeforeFinishMidd
         let tool_rounds = run.activity.tool_rounds;
         drop(runs);
         response.continue_turn = Some(self.check.clone());
+        // The check is the one call in a run where thinking is worth the
+        // bounded risk of a dead call: a result fitted on the wrong axis is
+        // caught by asking what the request implied, which a model running
+        // without reasoning (the fallback after dead calls) does not do.
+        ctx.request_reasoning();
         tracing::info!(
             tool_rounds,
             remaining_model_calls = ctx.limits.remaining_model_calls(),

@@ -29,8 +29,36 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
             return false;
         }
         let count = items.len();
+        let first_index = messages.len();
+        // Payloads follow the capture policy, like every other event.
+        // One slot per applied message so payloads stay aligned with
+        // `first_index..first_index + count`; an uncaptured message is `null`.
+        // Nothing is emitted at all when no message in the batch is captured.
+        let is_captured = |message: &Message| match message {
+            Message::Tool(_) => self.policy.capture.tool_io,
+            _ => self.policy.capture.model_io,
+        };
+        let captured: Vec<serde_json::Value> = if items.iter().any(is_captured) {
+            items
+                .iter()
+                .map(|message| {
+                    if is_captured(message) {
+                        super::lifecycle::to_value_logged(message)
+                    } else {
+                        serde_json::Value::Null
+                    }
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         messages.extend(items);
-        let record = ctx.emit(AgentEvent::QueuedMessageApplied { lane, count });
+        let record = ctx.emit(AgentEvent::QueuedMessageApplied {
+            lane,
+            count,
+            first_index,
+            messages: captured,
+        });
         status.set_last_event(record.id);
         tracing::debug!(
             target: "tinyagents::agent_loop",

@@ -141,7 +141,7 @@ fn queued_applied(events: &[AgentEvent]) -> Vec<(QueueLane, usize)> {
     events
         .iter()
         .filter_map(|event| match event {
-            AgentEvent::QueuedMessageApplied { lane, count } => Some((*lane, *count)),
+            AgentEvent::QueuedMessageApplied { lane, count, .. } => Some((*lane, *count)),
             _ => None,
         })
         .collect()

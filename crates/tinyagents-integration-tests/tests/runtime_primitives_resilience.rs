@@ -185,6 +185,7 @@ fn loop9b_error_remains_the_default_behavior() {
 fn loop6_failure_variants_exist_for_tool_model_and_subagent() {
     let events = [
         AgentEvent::ToolFailed {
+            parent_call_id: None,
             call_id: CallId::new("c1"),
             tool_name: "search".into(),
             started_at_ms: Some(1),

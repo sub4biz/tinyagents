@@ -4,7 +4,7 @@
 //! placement, and compaction-generation chains.
 
 use super::project::{project_records, project_thread, resolve_files};
-use super::types::{DisplayItem, SubagentStatus, ToolCallStatus};
+use super::types::{DisplayItem, ToolCallStatus, TranscriptSubagentStatus};
 use crate::transcript::{
     self, SessionRef, TranscriptMessage, TranscriptMeta, TranscriptToolCall, TurnUsage,
     read_transcript, read_transcript_display,
@@ -377,7 +377,7 @@ fn subagent_of_a_session_root_is_discovered_and_placed_after_its_spawning_call()
             assert_eq!(agent_id.as_deref(), Some("researcher"));
             assert_eq!(task_id.as_deref(), Some("sub-abc-123"));
             assert_eq!(call_id.as_deref(), Some("c-research"));
-            assert_eq!(*status, SubagentStatus::Completed);
+            assert_eq!(*status, TranscriptSubagentStatus::Completed);
             assert_eq!(request_id.as_deref(), Some("req-2"));
             assert!(items.iter().any(|inner| matches!(
                 inner,
@@ -406,7 +406,7 @@ fn subagent_of_a_session_root_is_discovered_and_placed_after_its_spawning_call()
 fn subagent_status_follows_a_legacy_incomplete_marker() {
     assert_eq!(
         status_for_delegation_result("[SUBAGENT_INCOMPLETE] gave up"),
-        SubagentStatus::Incomplete
+        TranscriptSubagentStatus::Incomplete
     );
 }
 
@@ -417,20 +417,20 @@ fn subagent_status_follows_a_typed_incomplete_result() {
         status_for_delegation_result(
             r#"{"job_id":"j","status":"incomplete","incomplete_kind":"timeout"}"#
         ),
-        SubagentStatus::Incomplete
+        TranscriptSubagentStatus::Incomplete
     );
     assert_ne!(
         status_for_delegation_result(r#"{"status":"incomplete"}"#),
-        SubagentStatus::Incomplete,
+        TranscriptSubagentStatus::Incomplete,
         "foreign JSON without the harness job keys is not trusted"
     );
     assert_eq!(
         status_for_delegation_result(r#"{"job_id":"j","status":"completed"}"#),
-        SubagentStatus::Completed
+        TranscriptSubagentStatus::Completed
     );
 }
 
-fn status_for_delegation_result(result: &str) -> SubagentStatus {
+fn status_for_delegation_result(result: &str) -> TranscriptSubagentStatus {
     let dir = TempDir::new().unwrap();
     let root_stem = "900_orchestrator";
     let thread_id = "thr_sub_fail";

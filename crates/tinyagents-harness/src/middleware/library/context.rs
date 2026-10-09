@@ -484,9 +484,11 @@ impl ContextCompressionMiddleware {
 
         // The cheaper route first: cutting oversized tool results can cover the
         // overflow without a summary.
-        if self.route_over_trigger(ctx, request, prompt_tokens) {
-            return Ok(());
-        }
+        let mixed = match self.route_over_trigger(ctx, request, prompt_tokens) {
+            OverTrigger::Done => return Ok(()),
+            OverTrigger::Compact => false,
+            OverTrigger::CompactThenTruncate => true,
+        };
 
         // Anti-thrash: summaries that did not bring the prompt under the
         // trigger are not bought again during the cooldown.
@@ -579,7 +581,8 @@ impl ContextCompressionMiddleware {
                     &record.summary,
                     pinned.clone(),
                 );
-                let new_messages = splice_summary(to_keep, record.summary.clone());
+                let mut new_messages = splice_summary(to_keep, record.summary.clone());
+                self.cut_after_compaction(mixed, &mut new_messages);
                 let to_tokens = total_message_tokens(&new_messages);
                 self.finish_compaction(
                     ctx,
@@ -671,7 +674,8 @@ impl ContextCompressionMiddleware {
             &record.summary,
             pinned,
         );
-        let new_messages = splice_summary(to_keep, record.summary.clone());
+        let mut new_messages = splice_summary(to_keep, record.summary.clone());
+        self.cut_after_compaction(mixed, &mut new_messages);
         let to_tokens = total_message_tokens(&new_messages);
 
         self.finish_compaction(
@@ -700,6 +704,7 @@ impl ContextCompressionMiddleware {
 }
 
 mod overflow;
+use overflow::OverTrigger;
 mod summary;
 
 #[async_trait]
@@ -776,7 +781,7 @@ impl<State: Send + Sync, Ctx: Send + Sync> ModelMiddleware<State, Ctx>
                 continue;
             }
             match self
-                .compact_for_overflow(ctx, &base, overflow, attempts > 1)
+                .compact_for_overflow(ctx, &base, overflow, attempts > 1, truncate)
                 .await
             {
                 Some(shrunk) => {
@@ -798,6 +803,7 @@ impl<State: Send + Sync, Ctx: Send + Sync> ModelMiddleware<State, Ctx>
                         && let Some(cap) = cap
                         && self.announce_truncation(ctx, &base, cap)
                     {
+                        self.account_discarded(ctx, &result);
                         truncate = Some(cap);
                         continue;
                     }

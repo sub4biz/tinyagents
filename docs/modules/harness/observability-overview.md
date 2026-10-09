@@ -42,17 +42,27 @@ pub enum AgentEvent {
     ModelStarted { call_id: CallId, model: ModelName },
     ModelDelta { call_id: CallId, delta: MessageDelta },
     ModelCompleted { call_id: CallId, started_at_ms: Option<u64>, usage: Option<Usage> },
-    ToolStarted { call_id: CallId, tool_name: ToolName },
+    ToolStarted { call_id: CallId, tool_name: ToolName, parent_call_id: Option<CallId> },
     ToolDelta { call_id: CallId, delta: ToolDelta },
-    ToolCompleted { call_id: CallId, tool_name: ToolName, started_at_ms: Option<u64> },
-    MiddlewareStarted { name: String },
-    MiddlewareCompleted { name: String },
+    ToolCompleted { call_id: CallId, tool_name: ToolName, started_at_ms: Option<u64>, parent_call_id: Option<CallId> },
+    MiddlewareStarted { name: String, call_id: Option<CallId> },
+    MiddlewareCompleted { name: String, call_id: Option<CallId> },
     RetryScheduled { call_id: CallId, attempt: usize },
     Custom { name: String, payload: serde_json::Value },
-    RunCompleted { run_id: RunId },
-    RunFailed { run_id: RunId, error: String },
+    TurnStarted { turn: u32 },
+    TurnCompleted { turn: u32, tool_result_count: usize, tool_call_ids: Vec<CallId> },
+    MessageAppended { role: String, index: usize, call_id: Option<CallId>, message: Option<Value> },
+    RunCompleted { run_id: RunId, outcome: Option<TerminalOutcome> },
+    RunFailed { run_id: RunId, error: String, outcome: Option<TerminalOutcome> },
 }
 ```
+
+`outcome` on `RunCompleted` / `RunFailed` is a typed `TerminalOutcome` (a
+`reason`, a coarse `class`, `provider_started`, and a `timeout_phase` for
+timeouts). It is `Some` for every run this crate ends and `None` only when
+replaying journals written before the field existed. The reason mapping,
+lifecycle events and `MessageRetracted` / `TranscriptRewritten` semantics are in
+[terminal outcome and turn lifecycle](terminal-outcome.md).
 
 Streaming modes:
 

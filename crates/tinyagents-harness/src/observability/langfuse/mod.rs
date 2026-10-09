@@ -559,6 +559,7 @@ fn observation_event(
             })
         }
         AgentEvent::ToolCompleted {
+            parent_call_id,
             call_id,
             tool_name,
             started_at_ms,
@@ -600,7 +601,12 @@ fn observation_event(
                 "body": clean_nulls(json!({
                     "id": scoped_observation_id(trace_id, call_id.as_str()),
                     "traceId": trace_id,
-                    "parentObservationId": parent,
+                    // A nested call (C9) nests under its immediate parent's
+                    // span; everything else hangs off the run span.
+                    "parentObservationId": parent_call_id
+                        .as_ref()
+                        .map(|p| scoped_observation_id(trace_id, p.as_str()))
+                        .unwrap_or_else(|| parent.clone()),
                     "name": tool_name,
                     "startTime": started_at_ms.map(iso_ms).unwrap_or_else(|| timestamp.clone()),
                     "endTime": end_time,

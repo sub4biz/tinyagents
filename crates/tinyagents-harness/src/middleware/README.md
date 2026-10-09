@@ -71,6 +71,12 @@ the loop itself) skips its own dispatch for that error.
   complete-run onion used for host-owned behavior and resource lifecycles.
 - `ModelMiddleware<State, Ctx>` / `ToolMiddleware<State, Ctx>` — the wrap
   traits, each with a single `wrap_model` / `wrap_tool` method.
+  `wrap_tool` and `ToolHandler::run` / `ToolBaseCall::call` take a shared
+  `&RunContext` (previously `&mut`; migrate by dropping the `mut`), so a
+  multi-call tool batch runs the wrap onion inside each concurrent call. A wrap
+  that cannot tolerate overlap returns `false` from
+  `ToolMiddleware::concurrent_safe` to keep batches serial. See
+  `docs/modules/harness/middleware-tool-wrap.md`.
 - `MiddlewareStack<State, Ctx>` — the composer; `push` / `push_model` /
   `push_tool` register middleware, `run_before_agent` / `run_after_agent` /
   `run_wrapped_model` / `run_wrapped_tool` / etc. run them.

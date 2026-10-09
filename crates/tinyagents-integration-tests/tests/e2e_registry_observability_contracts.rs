@@ -155,11 +155,13 @@ fn component_metadata_and_event_kinds_are_stable_serializable_contracts() {
             output: None,
         },
         AgentEvent::ToolStarted {
+            parent_call_id: None,
             call_id: CallId::new("tool-1"),
             tool_name: "lookup".into(),
             input: None,
         },
         AgentEvent::ToolCompleted {
+            parent_call_id: None,
             call_id: CallId::new("tool-1"),
             tool_name: "lookup".into(),
             started_at_ms: None,
@@ -171,8 +173,14 @@ fn component_metadata_and_event_kinds_are_stable_serializable_contracts() {
             metadata: None,
         },
         AgentEvent::StateUpdate,
-        AgentEvent::MiddlewareStarted { name: "mw".into() },
-        AgentEvent::MiddlewareCompleted { name: "mw".into() },
+        AgentEvent::MiddlewareStarted {
+            name: "mw".into(),
+            call_id: None,
+        },
+        AgentEvent::MiddlewareCompleted {
+            name: "mw".into(),
+            call_id: None,
+        },
         AgentEvent::CacheHit {
             call_id: CallId::new("cache-1"),
             key: "secret-key".into(),
@@ -228,6 +236,12 @@ fn component_metadata_and_event_kinds_are_stable_serializable_contracts() {
             call_id: CallId::new("tool-1"),
             message: "halfway".into(),
         },
+        AgentEvent::ToolProgressDetail {
+            call_id: CallId::new("tool-1"),
+            message: "halfway".into(),
+            fraction: Some(0.5),
+            partial: None,
+        },
         AgentEvent::MiddlewareFailed {
             name: "mw".into(),
             error: "boom".into(),
@@ -235,10 +249,12 @@ fn component_metadata_and_event_kinds_are_stable_serializable_contracts() {
         AgentEvent::StreamClosed,
         AgentEvent::RunCompleted {
             run_id: RunId::new("run-1"),
+            outcome: None,
         },
         AgentEvent::RunFailed {
             run_id: RunId::new("run-2"),
             error: "bad".into(),
+            outcome: None,
         },
     ];
     let kinds: Vec<_> = events.iter().map(AgentEvent::kind).collect();
@@ -275,6 +291,7 @@ async fn event_sinks_journals_and_status_stores_preserve_run_lineage() {
     });
     let second = sink.emit(AgentEvent::RunCompleted {
         run_id: RunId::new("run-1"),
+        outcome: None,
     });
     assert_eq!(first.offset, 0);
     assert_eq!(second.offset, 1);
@@ -284,11 +301,13 @@ async fn event_sinks_journals_and_status_stores_preserve_run_lineage() {
     let journal = EventJournal::new();
     assert!(journal.is_empty());
     journal.append(AgentEvent::ToolStarted {
+        parent_call_id: None,
         call_id: CallId::new("tool-1"),
         tool_name: "lookup".into(),
         input: None,
     });
     journal.append(AgentEvent::ToolCompleted {
+        parent_call_id: None,
         call_id: CallId::new("tool-1"),
         tool_name: "lookup".into(),
         started_at_ms: None,

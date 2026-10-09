@@ -7,7 +7,9 @@
 pub mod deferred;
 pub mod discover;
 pub mod effects;
+pub mod nested;
 pub mod packs;
+mod progress;
 mod prompt;
 mod schema;
 mod schema_compact;
@@ -31,6 +33,8 @@ pub use effects::{
     LedgerFailure, ToolEffect, ToolEffectLedger, ToolEffectSettle, ToolEffectStart,
     ToolEffectStatus,
 };
+pub use nested::NestedToolRunner;
+pub(crate) use progress::{ToolProgressGate, ToolProgressLimits};
 pub use prompt::*;
 pub use schema::*;
 pub use schema_compact::*;
@@ -88,6 +92,12 @@ pub trait ToolDispatch<State: Send + Sync, Ctx: Send + Sync>: Send + Sync {
     }
 
     /// Executes with the full typed parent run when the dispatch needs it.
+    ///
+    /// The loop scopes the call's progress gate around the future this method
+    /// returns, so a dispatch that builds a [`ToolExecutionContext`] must do so
+    /// **inside** this future (as the canonical dispatch does); a context built
+    /// earlier or on another task carries no progress sink — and no nested-call
+    /// runner, so `ToolExecutionContext::call_tool` fails for that tool.
     ///
     /// `call_id` is the admitted call's id — the one the transcript row and
     /// the `ToolStarted`/`ToolCompleted` events carry — so a dispatch that
@@ -408,6 +418,7 @@ pub(crate) fn provider_schema(tool: &dyn tinytools::Tool) -> tinyinference_llm::
 #[cfg(test)]
 #[path = "canonical_tests.rs"]
 mod canonical_test;
+
 #[cfg(test)]
 #[path = "context_tests.rs"]
 mod context_test;

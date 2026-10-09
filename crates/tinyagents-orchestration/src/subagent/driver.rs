@@ -10,9 +10,9 @@ use super::policy::{AttemptSource, apply_outcome_policies, may_retry};
 use super::{IncompleteKind, SpawnAdmission, SpawnRejection, SubagentIncomplete, restrict_tools};
 use super::{
     PersistedSubagentPause, SubagentError, SubagentExecution, SubagentExecutor, SubagentOutcome,
-    SubagentPausePersistenceDisposition, SubagentPersistence, SubagentPersistenceDisposition,
-    SubagentPlanner, SubagentRequest, SubagentRunResult, SubagentStatus, SubagentTaskKey,
-    SubagentTerminalPersistenceDisposition,
+    SubagentOutcomeKind, SubagentPausePersistenceDisposition, SubagentPersistence,
+    SubagentPersistenceDisposition, SubagentPlanner, SubagentRequest, SubagentRunResult,
+    SubagentTaskKey, SubagentTerminalPersistenceDisposition,
 };
 use tinyagents_harness::error::TinyAgentsError;
 
@@ -460,7 +460,7 @@ impl<C: Send + 'static, H: Send + 'static> SubagentDriver<C, H> {
         mut outcome: SubagentOutcome,
         expected_pause: Option<super::SubagentResume>,
     ) -> Result<SubagentRunResult, SubagentError> {
-        outcome.status = SubagentStatus::Cancelled;
+        outcome.status = SubagentOutcomeKind::Cancelled;
         // Once cancellation has won, this is the one terminal action. Do not
         // race it with the already-latched token or a caller could observe an
         // indeterminate terminal write.
@@ -492,13 +492,13 @@ impl<C: Send + 'static, H: Send + 'static> SubagentDriver<C, H> {
         expected_pause: Option<super::SubagentResume>,
         cancellation: &CancellationToken,
     ) -> Result<SubagentRunResult, SubagentError> {
-        if matches!(&outcome.status, SubagentStatus::Cancelled) {
+        if matches!(&outcome.status, SubagentOutcomeKind::Cancelled) {
             return self
                 .persist_cancelled(task_key, outcome, expected_pause)
                 .await;
         }
         let disposition = match &outcome.status {
-            SubagentStatus::AwaitingInput(_) => {
+            SubagentOutcomeKind::AwaitingInput(_) => {
                 match self
                     .commit_or_cancel(
                         self.persistence.save_pause(PersistedSubagentPause {
@@ -529,7 +529,7 @@ impl<C: Send + 'static, H: Send + 'static> SubagentDriver<C, H> {
                     }
                 }
             }
-            SubagentStatus::Completed | SubagentStatus::Incomplete(_) => {
+            SubagentOutcomeKind::Completed | SubagentOutcomeKind::Incomplete(_) => {
                 match self
                     .commit_or_cancel(
                         async {
@@ -557,11 +557,11 @@ impl<C: Send + 'static, H: Send + 'static> SubagentDriver<C, H> {
                     }
                 }
             }
-            SubagentStatus::Cancelled => unreachable!("handled before persistence race"),
+            SubagentOutcomeKind::Cancelled => unreachable!("handled before persistence race"),
         };
         if matches!(
             &outcome.status,
-            SubagentStatus::Completed | SubagentStatus::Incomplete(_)
+            SubagentOutcomeKind::Completed | SubagentOutcomeKind::Incomplete(_)
         ) {
             let terminal = if matches!(
                 disposition,
@@ -613,7 +613,7 @@ impl<C: Send + 'static, H: Send + 'static> SubagentDriver<C, H> {
                 "pause compare-and-swap lost without a durable pause or terminal outcome".into(),
             ));
         };
-        if !matches!(paused.status, SubagentStatus::AwaitingInput(_)) {
+        if !matches!(paused.status, SubagentOutcomeKind::AwaitingInput(_)) {
             return Err(SubagentError::Persistence(
                 "durable pause record did not contain an awaiting-input outcome".into(),
             ));

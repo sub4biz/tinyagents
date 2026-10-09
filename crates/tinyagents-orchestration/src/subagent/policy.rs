@@ -26,7 +26,7 @@ use tinyinference_llm::message::Message;
 
 use super::{
     AttemptContextFactory, IncompleteKind, PreparedSubagent, ResultPolicy, SubagentError,
-    SubagentIncomplete, SubagentOutcome, SubagentRole, SubagentStatus,
+    SubagentIncomplete, SubagentOutcome, SubagentOutcomeKind, SubagentRole,
 };
 
 /// Whether a failed attempt `attempt` (0-based) may be retried.
@@ -124,7 +124,7 @@ pub(crate) async fn apply_outcome_policies(
     policy: &SubAgentPolicy,
     result_policy: &ResultPolicy,
 ) -> SubagentOutcome {
-    if !matches!(outcome.status, SubagentStatus::Completed) {
+    if !matches!(outcome.status, SubagentOutcomeKind::Completed) {
         return outcome;
     }
     let measured = tinyagents_graph::SubAgentOutput {
@@ -132,7 +132,7 @@ pub(crate) async fn apply_outcome_policies(
         ..Default::default()
     };
     if let Err(error) = policy.budget.check(&measured, &outcome.task_id) {
-        outcome.status = SubagentStatus::Incomplete(
+        outcome.status = SubagentOutcomeKind::Incomplete(
             SubagentIncomplete::new(error.to_string()).with_kind(IncompleteKind::BudgetExceeded),
         );
     }

@@ -1,6 +1,7 @@
 use std::{future::Future, sync::Arc};
 
 use tinyagents_harness::CancellationToken;
+use tinyagents_harness::terminal::{TerminalOutcome, TerminalReason};
 use tinyagents_session::transcript::{
     SessionRef, SessionTurnGuard, TranscriptHistory, TranscriptMessage, TranscriptPartial,
     TranscriptTurn, TurnUsage, lock_session_turn, session_stem,
@@ -602,7 +603,7 @@ impl<C: Clone + Send + Sync + 'static> Session<C> {
             _ = cancellation.cancelled() => return Err(RuntimeError::Cancelled),
             result = self.driver.execute(DriverRequest { history: input, tools, run_context, stream }) => result,
         };
-        let outcome = match driver_result {
+        let mut outcome = match driver_result {
             Ok(outcome) => outcome,
             Err(failure) => {
                 if let Some(partial) = failure.partial {
@@ -628,9 +629,13 @@ impl<C: Clone + Send + Sync + 'static> Session<C> {
                         self.committed_turns += 1;
                     }
                 }
+                terminal_guard.set_outcome(failure.outcome);
                 return Err(failure.error);
             }
         };
+        // Kept for `finalize_commit`: only a *committed* turn reports the
+        // driver's success classification; a later failure uses its own.
+        terminal_guard.driver_success_outcome = outcome.outcome.take();
         let candidate = Self::with_prefix_snapshot(&prefix, outcome.history);
         let committed = SessionTurnOutcome {
             history: candidate.clone(),
@@ -1050,6 +1055,14 @@ impl<C: Clone + Send + Sync + 'static> Session<C> {
 struct TerminalGuard<C: Clone + Send + Sync + 'static> {
     hooks: Arc<dyn SessionHooks<C>>,
     terminal: Option<SessionTerminal>,
+    /// The driver's own typed classification of a failure, when it supplied one.
+    outcome: Option<TerminalOutcome>,
+    /// The driver's typed classification of a run it returned successfully;
+    /// used only once the turn commits.
+    driver_success_outcome: Option<TerminalOutcome>,
+    /// `true` until a real terminal is set: the drop-time default means the
+    /// caller abandoned the turn, which is a cancellation.
+    abandoned: bool,
     committed: bool,
 }
 
@@ -1058,16 +1071,42 @@ impl<C: Clone + Send + Sync + 'static> TerminalGuard<C> {
         Self {
             hooks,
             terminal: Some(SessionTerminal::Failed("session turn dropped".into())),
+            outcome: None,
+            driver_success_outcome: None,
+            abandoned: true,
             committed: false,
         }
     }
 
     fn set(&mut self, terminal: SessionTerminal) {
         self.terminal = Some(terminal);
+        self.abandoned = false;
+    }
+
+    fn set_outcome(&mut self, outcome: Option<TerminalOutcome>) {
+        self.outcome = outcome;
+    }
+
+    /// Takes the pending terminal with its typed outcome: the driver's if it
+    /// gave one, a cancellation if the turn was abandoned, else derived.
+    fn take_pending(&mut self) -> Option<(SessionTerminal, TerminalOutcome)> {
+        let terminal = self.terminal.take()?;
+        let outcome = self.outcome.take().unwrap_or_else(|| {
+            if self.abandoned {
+                TerminalOutcome::new(TerminalReason::Cancelled, "session turn dropped")
+            } else {
+                terminal.outcome()
+            }
+        });
+        Some((terminal, outcome))
     }
 
     fn finalize_commit(&mut self, receipt: CommitReceipt<C>) -> tokio::task::JoinHandle<()> {
         let terminal = SessionTerminal::Completed(receipt.outcome.clone());
+        let outcome = self
+            .driver_success_outcome
+            .take()
+            .unwrap_or_else(|| terminal.outcome());
         // Removing the guard's terminal transfers exactly-once ownership to
         // the finalizer. `finish` and `Drop` then become no-ops for this turn.
         self.terminal = None;
@@ -1075,6 +1114,7 @@ impl<C: Clone + Send + Sync + 'static> TerminalGuard<C> {
         let hooks = self.hooks.clone();
         tokio::spawn(async move {
             let _ = hooks.after_commit(receipt).await;
+            let _ = hooks.on_terminal_outcome(outcome).await;
             let _ = hooks.on_terminal(terminal).await;
         })
     }
@@ -1084,21 +1124,35 @@ impl<C: Clone + Send + Sync + 'static> TerminalGuard<C> {
     }
 
     async fn finish(mut self) -> Result<(), RuntimeError> {
-        let Some(terminal) = self.terminal.take() else {
+        let Some((terminal, outcome)) = self.take_pending() else {
             return Ok(());
         };
-        self.hooks.on_terminal(terminal).await
+        // The terminal is already removed from the guard, so `Drop` can no
+        // longer deliver it. Run the hooks on their own task: if the caller's
+        // future is dropped while a hook is pending, the remaining hooks still
+        // run exactly once.
+        let hooks = self.hooks.clone();
+        let task = tokio::spawn(async move {
+            let _ = hooks.on_terminal_outcome(outcome).await;
+            hooks.on_terminal(terminal).await
+        });
+        match task.await {
+            Ok(result) => result,
+            Err(error) if error.is_panic() => std::panic::resume_unwind(error.into_panic()),
+            Err(_) => Ok(()),
+        }
     }
 }
 
 impl<C: Clone + Send + Sync + 'static> Drop for TerminalGuard<C> {
     fn drop(&mut self) {
-        let Some(terminal) = self.terminal.take() else {
+        let Some((terminal, outcome)) = self.take_pending() else {
             return;
         };
         let hooks = self.hooks.clone();
         if let Ok(runtime) = tokio::runtime::Handle::try_current() {
             runtime.spawn(async move {
+                let _ = hooks.on_terminal_outcome(outcome).await;
                 let _ = hooks.on_terminal(terminal).await;
             });
         }

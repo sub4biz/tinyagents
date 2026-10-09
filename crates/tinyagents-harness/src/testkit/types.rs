@@ -267,7 +267,7 @@ pub struct EventRecorder {
 ///         input: None,
 ///         output: None,
 ///     },
-///     AgentEvent::RunCompleted { run_id: RunId::new("r1") },
+///     AgentEvent::RunCompleted { run_id: RunId::new("r1"), outcome: None },
 /// ];
 /// let traj = Trajectory::from_events(events);
 /// assert_eq!(traj.model_call_count(), 1);

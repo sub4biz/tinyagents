@@ -20,6 +20,7 @@ use tinyagents_harness::ids::HarnessPhase;
 use tinyagents_harness::middleware::AgentRun;
 use tinyagents_harness::runtime::AgentHarness;
 use tinyagents_harness::steering::PauseState;
+use tinyagents_harness::terminal::{TerminalOutcome, TerminalReason};
 use tinyinference_llm::message::Message;
 
 use crate::command::{NodeResult, RouteTarget};
@@ -81,7 +82,10 @@ where
             messages: input,
             ..LoopState::default()
         };
+        ctx.reset_turn_tracker(loop_state.messages.len());
         let mut current: &str = node::PLAN;
+        let mut limit_stop = false;
+        let mut limit_kind = None;
 
         let outcome = loop {
             // Keeps `run.messages` a running snapshot of the transcript as
@@ -165,6 +169,9 @@ where
                             ));
                         }
                     };
+                    limit_stop |= loop_state.limit_stop;
+                    // Latch the first kind: a later command must not erase it.
+                    limit_kind = limit_kind.or(loop_state.limit_kind);
                     let Some(target) = command.goto.first() else {
                         break Err(TinyAgentsError::Validation(
                             "GraphLoopDriver: loop node's command carried no route".to_string(),
@@ -197,11 +204,81 @@ where
             }
         };
 
+        let terminal = match &outcome {
+            Ok(None) => {
+                let reason = if limit_stop {
+                    TerminalOutcome::limit_reached(
+                        limit_kind,
+                        format!(
+                            "stopped with the partial run: {} limit reached",
+                            limit_kind.map_or("run", |kind| kind.as_str())
+                        ),
+                    )
+                } else {
+                    TerminalOutcome::completed()
+                };
+                Some(reason.with_provider_started(ctx.provider_started()))
+            }
+            Ok(Some(interrupt)) => {
+                let reason = interrupt
+                    .payload
+                    .get("reason")
+                    .or_else(|| interrupt.payload.get("message"))
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string);
+                let outcome = if let Some(summary) = ctx.take_halted_by_guard() {
+                    TerminalOutcome::halted(summary)
+                } else {
+                    TerminalOutcome::new(
+                        TerminalReason::Paused,
+                        reason
+                            .clone()
+                            .unwrap_or_else(|| format!("paused at node `{}`", interrupt.node)),
+                    )
+                };
+                Some(outcome.with_provider_started(ctx.provider_started()))
+            }
+            Err(error) => {
+                use tinyagents_harness::terminal::TimeoutPhase;
+                let in_model_call = ctx.model_call_failed() || ctx.active_model_call.is_some();
+                let site = if in_model_call && ctx.call_provider_started() {
+                    TimeoutPhase::Provider
+                } else if in_model_call {
+                    TimeoutPhase::BeforeProvider
+                } else if ctx.provider_started() {
+                    TimeoutPhase::AfterTurn
+                } else {
+                    TimeoutPhase::BeforeProvider
+                };
+                // A `LimitExceeded` carries only text; the cap that tripped was
+                // announced by a `LimitReached` event just before.
+                let kind = matches!(error, TinyAgentsError::LimitExceeded(_))
+                    .then(|| ctx.peek_last_limit())
+                    .flatten();
+                let mut outcome = TerminalOutcome::from_error(error, site).with_limit_kind(kind);
+                // A failed summarizer already received a provider response, though
+                // summarizer calls bypass the context's dispatch marker.
+                outcome.provider_started = ctx.provider_started()
+                    || matches!(error, TinyAgentsError::SummarizationUsage { .. });
+                Some(outcome)
+            }
+        };
+        run.terminal = terminal.clone();
         status.mark_running(HarnessPhase::Middleware);
-        harness
-            .middleware()
-            .run_after_agent(ctx, state, run)
-            .await?;
+        let after_agent = harness.middleware().run_after_agent(ctx, state, run).await;
+        if let Err(hook_error) = after_agent {
+            if outcome.is_err() {
+                // The originating node failure stays authoritative, as in the
+                // direct loop; the hook still ran for its cleanup.
+                tracing::warn!(
+                    target: "tinyagents::agent_loop",
+                    error = %hook_error,
+                    "[agent_loop] after_agent failed after a node error; keeping the node error"
+                );
+            } else {
+                return Err(hook_error);
+            }
+        }
 
         // `status.mark_completed`/`mark_interrupted`/`mark_failed` and (on
         // error) `AgentEvent::RunFailed` are applied centrally by
@@ -214,8 +291,15 @@ where
         // interrupt.
         match outcome {
             Ok(None) => {
+                // `after_agent` may have replaced the outcome; report the final one.
+                let outcome = run
+                    .terminal
+                    .clone()
+                    .or(terminal)
+                    .expect("terminal set before after_agent");
                 let record = ctx.emit(AgentEvent::RunCompleted {
                     run_id: ctx.run_id().clone(),
+                    outcome: Some(outcome),
                 });
                 status.set_last_event(record.id);
                 Ok(())
@@ -234,10 +318,15 @@ where
                         .unwrap_or_else(|| format!("paused at node `{}`", interrupt.node)),
                 });
                 status.set_last_event(record.id);
-                run.paused = Some(PauseState {
-                    reason,
-                    paused_at_checkpoint: 0,
-                });
+                if !matches!(
+                    run.terminal.as_ref().map(|outcome| outcome.reason),
+                    Some(TerminalReason::Halted)
+                ) {
+                    run.paused = Some(PauseState {
+                        reason,
+                        paused_at_checkpoint: 0,
+                    });
+                }
                 Ok(())
             }
             Err(error) => Err(error),

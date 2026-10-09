@@ -38,7 +38,7 @@ struct Base {
 impl ToolBaseCall<(), Host> for Base {
     fn call<'a>(
         &'a self,
-        _ctx: &'a mut RunContext<Host>,
+        _ctx: &'a RunContext<Host>,
         _state: &'a (),
         _call: ToolCall,
     ) -> BoxToolFuture<'a> {
@@ -106,9 +106,9 @@ async fn run(mw: Arc<dyn ToolMiddleware<(), Host>>, name: &str, fail: bool) -> (
     };
     let mut stack: MiddlewareStack<(), Host> = MiddlewareStack::new();
     stack.push_tool_middleware(mw);
-    let mut c = ctx();
+    let c = ctx();
     let result = stack
-        .run_wrapped_tool(&mut c, &(), call(name), &base)
+        .run_wrapped_tool(&c, &(), call(name), &base)
         .await
         .unwrap()
         .into_result();
@@ -343,4 +343,142 @@ fn record_approved_needs_a_ticket_and_a_result() {
         *resolver.recorded.lock().unwrap(),
         vec![("t-1".to_string(), true)]
     );
+}
+
+// ── Concurrent batches: approval prompts are serialised, the rest is not ────
+
+/// Resolver that records how many `resolve` calls overlap. Names starting
+/// with `gated` need approval.
+struct SlowResolver {
+    active: std::sync::atomic::AtomicUsize,
+    max_active: std::sync::atomic::AtomicUsize,
+}
+
+#[async_trait]
+impl ApprovalResolver<Host> for SlowResolver {
+    async fn requires_approval(&self, _ctx: &RunContext<Host>, call: &ToolCall) -> bool {
+        call.name.starts_with("gated")
+    }
+
+    async fn resolve(&self, _ctx: &RunContext<Host>, _call: &ToolCall) -> ApprovalResolution {
+        use std::sync::atomic::Ordering;
+        let now = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+        self.max_active.fetch_max(now, Ordering::SeqCst);
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        self.active.fetch_sub(1, Ordering::SeqCst);
+        ApprovalResolution::Allow { ticket: None }
+    }
+
+    fn record(&self, _ticket: &str, _result: &ToolResult) {}
+}
+
+/// Policy that requires approval for the `gated*` tools.
+struct GatedNamePolicy;
+
+#[async_trait]
+impl ToolCallPolicy<Host> for GatedNamePolicy {
+    fn name(&self) -> &str {
+        "gated_name_policy"
+    }
+
+    async fn check(&self, _ctx: &RunContext<Host>, call: &ToolCall) -> PolicyDecision {
+        if call.name.starts_with("gated") {
+            PolicyDecision::require_approval("needs approval")
+        } else {
+            PolicyDecision::Allow
+        }
+    }
+}
+
+/// Base that sleeps 100ms and records tool overlap.
+struct SleepingBase {
+    active: std::sync::atomic::AtomicUsize,
+    max_active: std::sync::atomic::AtomicUsize,
+}
+
+impl ToolBaseCall<(), Host> for SleepingBase {
+    fn call<'a>(
+        &'a self,
+        _ctx: &'a RunContext<Host>,
+        _state: &'a (),
+        _call: ToolCall,
+    ) -> BoxToolFuture<'a> {
+        Box::pin(async move {
+            use std::sync::atomic::Ordering;
+            let now = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+            self.max_active.fetch_max(now, Ordering::SeqCst);
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            self.active.fetch_sub(1, Ordering::SeqCst);
+            Ok(ToolResult::success("ran"))
+        })
+    }
+}
+
+/// Runs two approval-requiring calls and one free call concurrently through
+/// `middleware`, asserting prompts never overlap while the free call and the
+/// post-approval tool runs still do.
+async fn assert_approvals_serialise(
+    middleware: Arc<dyn ToolMiddleware<(), Host>>,
+    resolver: Arc<SlowResolver>,
+) {
+    use std::sync::atomic::Ordering;
+    let mut stack: MiddlewareStack<(), Host> = MiddlewareStack::new();
+    stack.push_tool_middleware(middleware);
+    let base = SleepingBase {
+        active: Default::default(),
+        max_active: Default::default(),
+    };
+    let c = ctx();
+
+    let started = tokio::time::Instant::now();
+    let results = futures::future::join_all(["gated_one", "gated_two", "free"].map(|name| {
+        let mut tool_call = call(name);
+        tool_call.id = format!("call-{name}");
+        stack.run_wrapped_tool(&c, &(), tool_call, &base)
+    }))
+    .await;
+    let elapsed = started.elapsed();
+
+    for result in results {
+        assert_eq!(result.unwrap().into_result().output(), "ran");
+    }
+    assert_eq!(
+        resolver.max_active.load(Ordering::SeqCst),
+        1,
+        "approval prompts must never overlap"
+    );
+    assert!(
+        base.max_active.load(Ordering::SeqCst) >= 2,
+        "the free call must run alongside the gated ones"
+    );
+    // Serial would be 2 * (50 + 100) + 100 = 400ms; serialising only the
+    // prompt gives 50 + 50 + 100 = 200ms.
+    assert!(
+        elapsed < std::time::Duration::from_millis(300),
+        "only the prompt is serialised, not the whole call; got {elapsed:?}"
+    );
+}
+
+fn slow_resolver() -> Arc<SlowResolver> {
+    Arc::new(SlowResolver {
+        active: Default::default(),
+        max_active: Default::default(),
+    })
+}
+
+#[tokio::test(start_paused = true)]
+async fn approval_gate_serialises_concurrent_prompts_only() {
+    let resolver = slow_resolver();
+    let middleware = Arc::new(ApprovalGateMiddleware::new("approval", resolver.clone()));
+    assert_approvals_serialise(middleware, resolver).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn policy_gate_serialises_concurrent_prompts_only() {
+    let resolver = slow_resolver();
+    let middleware = Arc::new(
+        ToolPolicyGateMiddleware::new(Arc::new(GatedNamePolicy))
+            .with_approval_resolver(resolver.clone()),
+    );
+    assert_approvals_serialise(middleware, resolver).await;
 }

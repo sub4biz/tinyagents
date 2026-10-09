@@ -344,3 +344,25 @@ pub enum SessionTerminal {
     /// The turn ended with an error after any recoverable partial persistence.
     Failed(String),
 }
+
+impl SessionTerminal {
+    /// A best-effort typed outcome derived from this terminal alone.
+    ///
+    /// A failure carries only its message here, so it classifies as
+    /// `Internal`. The precise outcome (timeout, provider failure, ...) is
+    /// delivered separately through
+    /// [`SessionHooks::on_terminal_outcome`][crate::SessionHooks::on_terminal_outcome].
+    pub fn outcome(&self) -> tinyagents_harness::terminal::TerminalOutcome {
+        use tinyagents_harness::terminal::{TerminalOutcome, TerminalReason};
+        match self {
+            Self::Completed(turn) if turn.interrupted => {
+                TerminalOutcome::new(TerminalReason::Paused, "turn interrupted before completion")
+            }
+            Self::Completed(_) => TerminalOutcome::completed(),
+            Self::Cancelled => TerminalOutcome::new(TerminalReason::Cancelled, "turn cancelled"),
+            Self::Failed(message) => {
+                TerminalOutcome::new(TerminalReason::Internal, message.clone())
+            }
+        }
+    }
+}

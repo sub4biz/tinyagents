@@ -12,9 +12,12 @@
 //!    empty reply, a dropped or undecodable call): re-issue or re-prompt.
 
 use super::run_loop::{
-    DROPPED_TOOL_CALL_NUDGE, TRUNCATED_EMPTY_ANSWER_NUDGE, TRUNCATED_EMPTY_TOOL_NUDGE,
+    DROPPED_TOOL_CALL_NUDGE, TRUNCATED_EMPTY_ANSWER_NUDGE, TRUNCATED_EMPTY_CARRY_PREFIX,
+    TRUNCATED_EMPTY_CARRY_SUFFIX, TRUNCATED_EMPTY_REASONING_OFF_ANSWER_NOTE,
+    TRUNCATED_EMPTY_REASONING_OFF_TOOL_NOTE, TRUNCATED_EMPTY_TOOL_NUDGE,
     UNDECODABLE_TOOL_CALL_NUDGE, WITHHELD_TOOL_CALL_NUDGE, truncated_call_positions,
 };
+use super::turn_recovery::TRUNCATED_CLOCK_NUDGE_LIMIT;
 use super::*;
 
 impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
@@ -65,6 +68,7 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
                         "[agent_loop] length-truncated tool calls keep recurring; truncated-tool-call retry budget exhausted"
                     );
                     messages.pop();
+                    ctx.retract_transcript(messages.len());
                     return Err(TinyAgentsError::LimitExceeded(format!(
                         "run `{}` stopped: {} consecutive \
                              retries of a tool call truncated by the output token limit did not \
@@ -144,9 +148,9 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
     }
 
     /// Recovery for a response with no real tool call that is not yet a usable
-    /// answer. Returns `true` when a retry or re-prompt was scheduled and the
-    /// loop must run another turn; `false` when the response stands and the
-    /// caller goes on to resolve the turn.
+    /// answer. Returns `true` when the loop must continue for recovery or its
+    /// existing limit handling; `false` when the response stands and the caller
+    /// goes on to resolve the turn.
     ///
     /// The checks run in a fixed order: a withheld call, a truncated-empty
     /// retry, a truncated-empty nudge, a non-truncated empty retry, and a
@@ -165,6 +169,7 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
             response,
             tool_calls,
             attempt_max_tokens,
+            started_at_ms,
             recovery,
             tools_available: tools_available_this_turn,
             text_dialect_calls_recoverable,
@@ -189,6 +194,7 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
         {
             turn_recovery.withheld_call_nudges_used += 1;
             messages.pop();
+            ctx.retract_transcript(messages.len());
             tracing::info!(
                 target: "tinyagents::agent_loop",
                 run_id = %ctx.run_id(),
@@ -225,19 +231,63 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
         let truncated_empty = tool_calls.is_empty()
             && crate::finish_reason::is_length_stop(response.finish_reason.as_deref())
             && response.text().trim().is_empty();
+        if truncated_empty && self.policy.truncated_empty_reasoning_fallback {
+            // Whatever follows (a retry, a nudge, or nothing), the next calls
+            // go out without reasoning: the cap and the effort label have
+            // both been shown not to stop this.
+            let holdoff = turn_recovery.reasoning_fallback.on_dead_call();
+            ctx.emit(AgentEvent::ControlApplied {
+                control: "reasoning_fallback".to_string(),
+                detail: format!(
+                    "model call `{call_id}` died at its output cap with nothing to show; \
+                     the next {holdoff} call(s) go out with reasoning switched off"
+                ),
+            });
+        }
+        let reasoning_off = self.policy.truncated_empty_reasoning_fallback
+            && turn_recovery.reasoning_fallback.active();
+        // What a retry would cost and whether it can change anything. The
+        // dead call's own duration and output count give the rate this model
+        // emits at here; the next cap divided by that rate is how long the
+        // retry would run if it dies the same way.
+        let truncated_retry = truncated_empty.then(|| {
+            let dead_ms = crate::ids::now_ms().saturating_sub(started_at_ms);
+            let dead_tokens = response
+                .usage
+                .as_ref()
+                .map(|u| u.output_tokens)
+                .unwrap_or(0);
+            let remaining = crate::middleware::library::TurnClock::of(
+                ctx,
+                self.policy
+                    .limits
+                    .max_wall_clock_ms
+                    .map(std::time::Duration::from_millis),
+            )
+            .map(|clock| clock.remaining());
+            turn_recovery.truncated_retry_plan(
+                attempt_max_tokens,
+                dead_tokens,
+                dead_ms,
+                remaining,
+                reasoning_off,
+            )
+        });
         if truncated_empty
             && turn_recovery.truncated_empty_retries_used < self.policy.truncated_empty_retries
             && ctx.limits.remaining_model_calls() > 0
+            && truncated_retry.as_ref().is_some_and(|plan| plan.worth_it())
         {
             // Drop the useless empty assistant row appended above so the
-            // retry re-sends the identical transcript.
+            // retry re-sends the identical transcript, plus the dead call's
+            // own working-out where it had any: that reasoning was real
+            // progress (a correct derivation, cut off), and without it every
+            // retry starts the same derivation over.
             messages.pop();
-            turn_recovery.truncated_empty_retries_used += 1;
-            // Grow the token budget when the request set one: double it,
-            // clamped at 4x the original cap. An unset budget stays unset
-            // (a plain retry is still worthwhile — the failure is
-            // stochastic).
-            turn_recovery.boost_max_tokens(attempt_max_tokens);
+            ctx.retract_transcript(messages.len());
+            self.carry_dead_call_reasoning(ctx, messages, call_id, response);
+            let plan = truncated_retry.expect("a truncated-empty reply has a plan");
+            turn_recovery.take_truncated_retry(attempt_max_tokens, &plan);
             let record = ctx.emit(AgentEvent::RetryScheduled {
                 call_id: call_id.clone(),
                 attempt: turn_recovery.truncated_empty_retries_used as usize,
@@ -245,25 +295,113 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
             status.set_last_event(record.id);
             return true;
         }
+        // A retry that cannot grow the cap re-sends the transcript that just
+        // died at this cap, and one that would run past half the remaining
+        // clock leaves no time to use its result either way (one 13-minute
+        // run spent ten of them in four such calls, the last two at the
+        // ceiling, and ended with nothing written). Say why, and let the
+        // nudge below ask for a smaller step instead. The cap it runs under is
+        // pinned to what the clock affords.
+        if let Some(plan) = truncated_retry
+            .as_ref()
+            .filter(|plan| !plan.worth_it())
+            .filter(|_| {
+                turn_recovery.truncated_empty_retries_used < self.policy.truncated_empty_retries
+            })
+        {
+            let reason = plan.skip_reason();
+            tracing::info!(
+                target: "tinyagents::agent_loop",
+                run_id = %ctx.run_id(),
+                call_id = %call_id,
+                dead_ms = plan.dead_ms,
+                dead_tokens = plan.dead_tokens,
+                current_cap = ?plan.current,
+                next_cap = ?plan.next,
+                remaining_ms = ?plan.remaining.map(|d| d.as_millis()),
+                "[agent_loop] truncated-empty retry skipped: {reason}"
+            );
+            ctx.emit(AgentEvent::ControlApplied {
+                control: "truncated_empty_retry_skipped".to_string(),
+                detail: format!("model call `{call_id}`: {reason}"),
+            });
+            if let Some(cap) = plan.affordable_cap() {
+                turn_recovery.boosted_max_tokens = Some(cap);
+            }
+        }
 
-        // The boosted retry is spent and the model still deliberated
-        // past its output budget. Re-sending the same transcript keeps
-        // failing the same way (a high-effort reasoning model thinks
-        // as long as it is allowed to), and finishing here hands the
-        // host a blank reply it can only close as if the work were
-        // done. Say plainly what happened and ask for the next step,
-        // then carry on with the loop. The boosted cap stays in force.
+        // The retries are spent and the model still deliberated past its
+        // output budget. Re-sending the same transcript keeps failing the
+        // same way (a high-effort reasoning model thinks as long as it is
+        // allowed to), and finishing here hands the host a blank reply it
+        // can only close as if the work were done. Say plainly what happened
+        // and ask for the next step, then carry on with the loop.
+        //
+        // A nudged call that dies too used to end the turn: the loop
+        // surfaced the blank and the host closed the run, in one case with
+        // 21 of 30 minutes unused and the deliverable unwritten. While the
+        // run has a clock with room for another bounded call, keep nudging,
+        // and halve the output cap each time: the cap is the one limit on
+        // deliberation these providers honour, and a smaller one makes the
+        // model act sooner.
+        let clock_allows_another_nudge = truncated_retry
+            .as_ref()
+            .is_some_and(|plan| plan.another_nudge_fits())
+            && turn_recovery.truncated_empty_nudges_used < TRUNCATED_CLOCK_NUDGE_LIMIT;
+        let clock_only_nudge =
+            turn_recovery.truncated_empty_nudges_used >= self.policy.truncated_empty_nudges;
+        let policy_nudge_fits = truncated_retry
+            .as_ref()
+            .is_some_and(|plan| plan.remaining.is_none() || plan.another_nudge_fits());
         if truncated_empty
-            && turn_recovery.truncated_empty_nudges_used < self.policy.truncated_empty_nudges
+            && (turn_recovery.truncated_empty_nudges_used < self.policy.truncated_empty_nudges
+                || clock_allows_another_nudge)
+            && policy_nudge_fits
             && ctx.limits.remaining_model_calls() > 0
         {
             messages.pop();
+            ctx.retract_transcript(messages.len());
+            self.carry_dead_call_reasoning(ctx, messages, call_id, response);
             turn_recovery.truncated_empty_nudges_used += 1;
-            let nudge = if tools_available_this_turn {
-                TRUNCATED_EMPTY_TOOL_NUDGE
-            } else {
-                TRUNCATED_EMPTY_ANSWER_NUDGE
+            let retry_was_skipped_for_clock = truncated_retry
+                .as_ref()
+                .is_some_and(|plan| !plan.fits_clock());
+            let retry_was_skipped_at_ceiling = truncated_retry
+                .as_ref()
+                .is_some_and(|plan| plan.at_ceiling());
+            let repeat_cap = (turn_recovery.truncated_empty_nudges_used > 1
+                || clock_only_nudge
+                || retry_was_skipped_for_clock
+                || retry_was_skipped_at_ceiling)
+                .then(|| truncated_retry.as_ref().and_then(|plan| plan.nudge_cap()))
+                .flatten();
+            if let Some(cap) = repeat_cap {
+                turn_recovery.boosted_max_tokens = Some(cap);
+            }
+            let mut nudge: String = match repeat_cap {
+                Some(cap) => format!(
+                    "Your reply was cut off again before any tool call or answer. The output \
+                     limit for the next call is {cap} tokens: reason in a few sentences at most, \
+                     then act: {}.",
+                    if tools_available_this_turn {
+                        "make one tool call"
+                    } else {
+                        "write a short answer from what you already have"
+                    }
+                ),
+                None if tools_available_this_turn => TRUNCATED_EMPTY_TOOL_NUDGE.to_string(),
+                None => TRUNCATED_EMPTY_ANSWER_NUDGE.to_string(),
             };
+            if reasoning_off {
+                // The deliberation the model cannot finish in its head goes
+                // into the workspace instead.
+                nudge.push(' ');
+                nudge.push_str(if tools_available_this_turn {
+                    TRUNCATED_EMPTY_REASONING_OFF_TOOL_NOTE
+                } else {
+                    TRUNCATED_EMPTY_REASONING_OFF_ANSWER_NOTE
+                });
+            }
             tracing::info!(
                 target: "tinyagents::agent_loop",
                 run_id = %ctx.run_id(),
@@ -309,6 +447,7 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
             && ctx.limits.remaining_model_calls() > 0
         {
             messages.pop();
+            ctx.retract_transcript(messages.len());
             turn_recovery.empty_response_retries_used += 1;
             tracing::info!(
                 target: "tinyagents::agent_loop",
@@ -354,6 +493,12 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
             && tools_available_this_turn
             && turn_recovery.dropped_tool_call_nudges_used < self.policy.dropped_tool_call_nudges
         {
+            if ctx.limits.remaining_model_calls() == 0 {
+                // Let the loop apply its limit policy without recording a retry
+                // that cannot run. Returning false would accept this response
+                // as final instead of preserving the limit stop.
+                return true;
+            }
             turn_recovery.dropped_tool_call_nudges_used += 1;
             let nudge = if undecodable_text_call {
                 tracing::info!(
@@ -380,4 +525,77 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
 
         false
     }
+
+    /// Appends the dead call's interrupted reasoning to the transcript as a
+    /// user message ahead of the retry or nudged call (see
+    /// [`dead_call_reasoning_carry`]), announcing it when it does.
+    fn carry_dead_call_reasoning(
+        &self,
+        ctx: &mut RunContext<Ctx>,
+        messages: &mut Vec<Message>,
+        call_id: &CallId,
+        response: &ModelResponse,
+    ) {
+        if let Some((carry, kept_chars)) =
+            dead_call_reasoning_carry(response, self.policy.truncated_empty_carry_reasoning_chars)
+        {
+            ctx.emit(AgentEvent::ControlApplied {
+                control: "truncated_empty_reasoning_carried".to_string(),
+                detail: format!(
+                    "model call `{call_id}`: {kept_chars} chars of its interrupted reasoning carried into the transcript"
+                ),
+            });
+            messages.push(Message::user(carry));
+        }
+    }
+}
+
+/// The dead call's reasoning, framed for the transcript, when the response
+/// carries any and the policy keeps it. The *last* `limit` characters are
+/// kept: a derivation's state of play is at its end, and its start is the
+/// part a fresh call re-derives fastest. `None` for a response with no
+/// reasoning, a limit of zero, or reasoning too short to be worth a message.
+/// Returns the framed message and the number of reasoning characters it
+/// keeps (the framing excluded).
+fn dead_call_reasoning_carry(response: &ModelResponse, limit: usize) -> Option<(String, usize)> {
+    const MIN_CARRY_CHARS: usize = 200;
+    if limit == 0 {
+        return None;
+    }
+    let reasoning: String = response
+        .message
+        .content
+        .iter()
+        .filter_map(|block| match block {
+            tinyinference_llm::message::ContentBlock::Thinking { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    let reasoning = reasoning.trim();
+    // Both bounds are in characters, as the policy field is documented, not
+    // in UTF-8 bytes.
+    let total_chars = reasoning.chars().count();
+    if total_chars < MIN_CARRY_CHARS {
+        return None;
+    }
+    let tail = if total_chars > limit {
+        // Keep the last `limit` characters, then cut on a line boundary where
+        // one is near, so the excerpt does not open mid-word.
+        let start = reasoning
+            .char_indices()
+            .nth(total_chars - limit)
+            .map_or(0, |(index, _)| index);
+        let excerpt = &reasoning[start..];
+        match excerpt.find('\n') {
+            Some(nl) if nl < 200 => &excerpt[nl + 1..],
+            _ => excerpt,
+        }
+    } else {
+        reasoning
+    };
+    let kept_chars = tail.chars().count();
+    Some((
+        format!("{TRUNCATED_EMPTY_CARRY_PREFIX}[…]\n{tail}{TRUNCATED_EMPTY_CARRY_SUFFIX}"),
+        kept_chars,
+    ))
 }

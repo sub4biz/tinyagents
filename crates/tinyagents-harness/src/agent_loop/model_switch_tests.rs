@@ -585,6 +585,36 @@ impl Middleware<()> for Tweak {
     }
 }
 
+/// Raises the required capabilities only from the second model call on.
+struct RequiresToolsAfterFirstCall {
+    calls: Mutex<usize>,
+}
+
+#[async_trait]
+impl Middleware<()> for RequiresToolsAfterFirstCall {
+    fn name(&self) -> &str {
+        "requires_tools_after_first_call"
+    }
+
+    async fn before_model(
+        &self,
+        _ctx: &mut RunContext<()>,
+        _state: &(),
+        request: &mut ModelRequest,
+    ) -> crate::error::Result<()> {
+        let mut calls = self.calls.lock().unwrap();
+        *calls += 1;
+        // Only once a tool result is in the transcript (second model call).
+        if request.messages.len() > 1 {
+            request
+                .required_capabilities
+                .get_or_insert_default()
+                .tool_calling = true;
+        }
+        Ok(())
+    }
+}
+
 fn tool_capable(provider: &str, model: &str) -> ModelProfile {
     ModelProfile {
         tool_calling: true,
@@ -957,4 +987,28 @@ async fn fallback_keeps_an_absent_request_model_absent() {
 
     // A registry alias is not a provider model id: do not invent one.
     assert_eq!(b.requests()[0].model, None);
+}
+
+#[tokio::test]
+async fn a_switch_that_becomes_ineligible_after_being_reported_keeps_one_outcome() {
+    let (mut harness, _, _) = two_models(
+        ScriptedModel::replies(vec!["from a"]).with_profile(tool_capable("openai", "gpt-5")),
+        ScriptedModel::new(vec![call("c1")]).with_profile(profile("openai", "mini")),
+    );
+    harness.push_middleware(Arc::new(RequiresToolsAfterFirstCall {
+        calls: Mutex::new(0),
+    }));
+    let handle = SteeringHandle::allow_all_with_model_switch();
+    handle.send(switch("b"));
+    let recorder = EventRecorder::new();
+
+    harness
+        .invoke_in_context(&(), context(&handle, &recorder), vec![Message::user("hi")])
+        .await
+        .expect("run succeeds");
+
+    assert_eq!(model_started(&recorder), vec!["b", "a"]);
+    // Accepted on the first call; the later rejection is not a second outcome.
+    assert_eq!(switch_outcomes(&recorder), vec![true]);
+    assert_eq!(skipped(&recorder).len(), 1);
 }

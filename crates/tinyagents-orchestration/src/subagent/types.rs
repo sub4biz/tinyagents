@@ -392,9 +392,16 @@ pub enum IncompleteKind {
     BudgetExceeded,
 }
 
-/// The visible status of one subagent run.
+/// The driver-level outcome of one subagent run: completed, paused for input,
+/// incomplete, or cancelled.
+///
+/// Not to be confused with the session crate's `TranscriptSubagentStatus` (a
+/// display projection read back from a transcript) or with the job / detached
+/// / task / run-ledger vocabularies; see the status-vocabulary map in the
+/// crate README. Formerly named `SubagentStatus`; the serde wire format is
+/// unchanged.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub enum SubagentStatus {
+pub enum SubagentOutcomeKind {
     /// The subagent completed normally.
     Completed,
     /// The subagent stopped at a resumable input boundary.
@@ -404,6 +411,13 @@ pub enum SubagentStatus {
     /// Cooperative cancellation won the lifecycle race.
     Cancelled,
 }
+
+/// Former name of [`SubagentOutcomeKind`].
+///
+/// Renamed so it no longer collides with the session crate's transcript-view
+/// status. The serde wire format is unchanged.
+#[deprecated(since = "2.1.4", note = "renamed to `SubagentOutcomeKind`")]
+pub type SubagentStatus = SubagentOutcomeKind;
 
 /// The durable lifecycle action that made a run result observable.
 ///
@@ -482,7 +496,7 @@ pub struct SubagentOutcome {
     /// Complete model history without lossy transcript conversion.
     pub history: Vec<Message>,
     /// Terminal or pause state.
-    pub status: SubagentStatus,
+    pub status: SubagentOutcomeKind,
     /// Model usage reported by the nested execution exactly once.
     pub usage: UsageTotals,
     /// Host-owned artifacts represented by neutral references.
@@ -504,7 +518,7 @@ impl SubagentOutcome {
     pub fn completed(task_id: impl Into<String>, output: impl Into<String>) -> Self {
         Self {
             output: output.into(),
-            status: SubagentStatus::Completed,
+            status: SubagentOutcomeKind::Completed,
             ..Self::cancelled(task_id)
         }
     }
@@ -516,7 +530,7 @@ impl SubagentOutcome {
             task_id: task_id.into(),
             output: String::new(),
             history: Vec::new(),
-            status: SubagentStatus::Cancelled,
+            status: SubagentOutcomeKind::Cancelled,
             usage: UsageTotals::default(),
             artifacts: Vec::new(),
             schema_error: None,
@@ -528,13 +542,13 @@ impl SubagentOutcome {
     /// answer, with its typed cause.
     pub fn incomplete(task_id: impl Into<String>, incomplete: SubagentIncomplete) -> Self {
         Self {
-            status: SubagentStatus::Incomplete(incomplete),
+            status: SubagentOutcomeKind::Incomplete(incomplete),
             ..Self::cancelled(task_id)
         }
     }
 
     pub(crate) fn cancelled_preserving(mut self) -> Self {
-        self.status = SubagentStatus::Cancelled;
+        self.status = SubagentOutcomeKind::Cancelled;
         self
     }
 }

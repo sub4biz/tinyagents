@@ -138,7 +138,7 @@ struct FixedBase(&'static str);
 impl ToolBaseCall<(), ()> for FixedBase {
     fn call<'a>(
         &'a self,
-        _ctx: &'a mut RunContext,
+        _ctx: &'a RunContext,
         _state: &'a (),
         _call: ToolCall,
     ) -> BoxToolFuture<'a> {
@@ -151,7 +151,7 @@ struct FieldsBase;
 impl ToolBaseCall<(), ()> for FieldsBase {
     fn call<'a>(
         &'a self,
-        _ctx: &'a mut RunContext,
+        _ctx: &'a RunContext,
         _state: &'a (),
         _call: ToolCall,
     ) -> BoxToolFuture<'a> {
@@ -179,10 +179,10 @@ impl ToolBaseCall<(), ()> for FieldsBase {
 async fn scrubs_markdown_and_follow_up_fields() {
     let mut stack: MiddlewareStack<()> = MiddlewareStack::new();
     stack.push_tool_middleware(Arc::new(CredentialScrubMiddleware::new()));
-    let mut ctx: RunContext = RunContext::new(RunConfig::new("mw-test"), ());
+    let ctx: RunContext = RunContext::new(RunConfig::new("mw-test"), ());
     let result = stack
         .run_wrapped_tool(
-            &mut ctx,
+            &ctx,
             &(),
             ToolCall::new("c1", "fetch", serde_json::json!({})),
             &FieldsBase,
@@ -221,10 +221,10 @@ async fn scrubs_a_bare_alphabetic_password_in_tool_result_fields() {
 async fn run(mw: CredentialScrubMiddleware, tool: &str, body: &'static str) -> String {
     let mut stack: MiddlewareStack<()> = MiddlewareStack::new();
     stack.push_tool_middleware(Arc::new(mw));
-    let mut ctx: RunContext = RunContext::new(RunConfig::new("mw-test"), ());
+    let ctx: RunContext = RunContext::new(RunConfig::new("mw-test"), ());
     stack
         .run_wrapped_tool(
-            &mut ctx,
+            &ctx,
             &(),
             ToolCall::new("c1", tool, serde_json::json!({})),
             &FixedBase(body),

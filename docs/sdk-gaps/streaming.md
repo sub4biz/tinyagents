@@ -25,10 +25,9 @@ OpenAI Responses API still has no true incremental SSE path in this crate
 (`stream()` does one unary call and replays it as `Started`/one
 `MessageDelta`/`Completed`), so there is nothing to derive blocks from there
 yet. `ProviderFailed` now also carries `partial_message`/`stop_reason` for a
-mid-stream failure on both adapters. Remaining: true mid-execution *tool*
-progress streaming — `tinytools::Tool` has no progress-callback surface, so
-`run_on_tool_delta`/`ToolProgress` still have no real caller; that needs a
-`tinytools` change, not a harness one.
+mid-stream failure on both adapters. Mid-execution *tool* progress streaming
+is now wired (C2): `tinytools::ToolRunContext::report_progress` is the surface,
+and the loop emits `AgentEvent::ToolProgressDetail` and calls `run_on_tool_delta`.
 
 Remaining work:
 
@@ -36,8 +35,6 @@ Remaining work:
   simulated as one unary call), then derive `BlockStart`/`BlockEnd` from its
   `response.output_text.delta` / `response.function_call_arguments.delta` /
   reasoning-summary delta events.
-- Give `tinytools::Tool` a progress-callback surface so `run_on_tool_delta`/
-  `ToolProgress` have a real, mid-execution caller.
 - Attribute every delta to run id, model call id, optional thread id, parent
   run id, and root run id (partially covered by `ModelStreamMetadata`).
 

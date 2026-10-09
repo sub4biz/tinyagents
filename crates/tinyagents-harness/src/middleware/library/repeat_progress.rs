@@ -175,7 +175,10 @@ impl RepeatProgressMiddleware {
     /// Latch a root-cause halt: record the summary the turn surfaces instead of an
     /// empty/last-model reply, and pause at the top of the next iteration (before
     /// the next model call), matching the repeated-failure breaker's halt path.
-    fn halt(&self, summary: String) {
+    fn halt<C>(&self, ctx: &mut RunContext<C>, summary: String) {
+        // Mark the run so the loop reports `TerminalReason::Halted` for the
+        // pause this causes, not a plain steering pause.
+        ctx.halted_by_guard = Some(summary.clone());
         *lock(&self.halt_summary) = Some(summary);
         self.handle.send(SteeringCommand::Pause);
     }
@@ -339,7 +342,7 @@ impl<C: Send + Sync> Middleware<(), C> for RepeatProgressMiddleware {
                     .get_mut(&run_id)
                     .is_none_or(|batch| !std::mem::replace(&mut batch.halted, true));
                 if first {
-                    self.halt(summary.clone());
+                    self.halt(ctx, summary.clone());
                 }
                 Err(TinyAgentsError::ToolFailed(summary))
             }
@@ -429,6 +432,10 @@ impl<C: Send + Sync> Middleware<(), C> for RepeatProgressMiddleware {
                     "[tinyagents::mw] repeat-progress appended a warning to the tool result"
                 );
                 append_note(result, &note);
+                // The loop's reasoning fallback reads this before the next
+                // call: a model repeating itself without reasoning gets
+                // reasoning back.
+                ctx.note_repeat();
             }
         }
         if already_halted {
@@ -447,7 +454,7 @@ impl<C: Send + Sync> Middleware<(), C> for RepeatProgressMiddleware {
             tool = tool_name,
             "[tinyagents::mw] crate successful-repeat tracker halted the run"
         );
-        self.halt(summary);
+        self.halt(ctx, summary);
         Ok(())
     }
 }

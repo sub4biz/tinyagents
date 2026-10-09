@@ -80,6 +80,22 @@ pub struct RunLimits {
     /// same as `Some(1)`: at least one call must be in flight to make
     /// progress.
     pub max_tool_concurrency: Option<usize>,
+    /// Maximum depth of tool calls a tool makes through
+    /// [`ToolExecutionContext::call_tool`][crate::tool::ToolExecutionContext::call_tool].
+    /// A call the model issues is level `0`; what that tool calls is level
+    /// `1`, and so on. A nested call whose level would exceed this cap fails
+    /// with a clear error. Defaults to [`RunLimits::DEFAULT_MAX_NESTED_DEPTH`],
+    /// `0`: **nested calls are off** and `call_tool` fails with "nested tool
+    /// calls are disabled (max_nested_depth = 0)".
+    ///
+    /// Opt in (`with_max_nested_depth`) only once every `before_tool`
+    /// enforcement the host registers also implements
+    /// [`Middleware::check_nested_tool`][crate::middleware::Middleware::check_nested_tool];
+    /// `before_tool` never runs for nested calls, so an enforcement that lacks
+    /// it is bypassed by `call_tool`.
+    ///
+    /// Distinct from [`Self::max_depth`], which bounds sub-*agent* recursion.
+    pub max_nested_depth: usize,
     /// Maximum silence, in milliseconds, between output events of a
     /// **streaming** model call, measured from the previous output event.
     /// `None` (or `Some(0)`) disables the inactivity timeout. Defaults to
@@ -230,6 +246,8 @@ impl LimitKind {
 impl RunLimits {
     /// Default sub-agent / recursion depth cap when none is configured.
     pub const DEFAULT_MAX_DEPTH: usize = 8;
+    /// Default [`RunLimits::max_nested_depth`]: `0`, nested calls disabled.
+    pub const DEFAULT_MAX_NESTED_DEPTH: usize = 0;
     /// Default [`RunLimits::stream_idle_timeout_ms`]: two minutes of silence.
     ///
     /// Generous on purpose: providers that hide reasoning can be quiet for a
@@ -251,6 +269,7 @@ impl Default for RunLimits {
             max_depth: Self::DEFAULT_MAX_DEPTH,
             behavior: LimitBehavior::Error,
             max_tool_concurrency: None,
+            max_nested_depth: Self::DEFAULT_MAX_NESTED_DEPTH,
             stream_idle_timeout_ms: Some(Self::DEFAULT_STREAM_IDLE_TIMEOUT_MS),
             stream_first_event_timeout_ms: None,
             max_consecutive_stream_idle_timeouts: Some(

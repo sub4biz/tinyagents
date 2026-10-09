@@ -33,11 +33,27 @@ pub struct RequestTruncation {
     pub saved_bytes: usize,
 }
 
+/// Whether `text` ends with the notice a truncation layer appends
+/// (`\n\n[… N of M bytes truncated by tool_result_budget. … …]`). Anchored to
+/// the end so a result that merely mentions the phrase is still cut.
+fn ends_with_truncation_notice(text: &str) -> bool {
+    if !text.ends_with("…]") {
+        return false;
+    }
+    let mut start = text.len().saturating_sub(TRAILER_RESERVED + 128);
+    while !text.is_char_boundary(start) {
+        start += 1;
+    }
+    let tail = &text[start..];
+    tail.rfind("\n\n[… ")
+        .is_some_and(|at| tail[at..].contains(TRUNCATION_MARKER))
+}
+
 /// Whether `text` is a candidate for cutting at `max_bytes`.
 fn is_reducible(text: &str, max_bytes: usize) -> bool {
     text.len() > max_bytes
         && !text.starts_with(PREVIEW_ENVELOPE_PREFIX)
-        && !text.contains(TRUNCATION_MARKER)
+        && !ends_with_truncation_notice(text)
 }
 
 /// Estimate, in bytes, of what [`truncate_tool_results`] could save at
@@ -48,6 +64,8 @@ pub fn reducible_tool_result_bytes(messages: &[Message], max_bytes: usize) -> us
     if max_bytes == 0 {
         return 0;
     }
+    // The same effective cap `truncate_tool_results` cuts to.
+    let max_bytes = max_bytes.max(TRAILER_RESERVED + 1);
     messages
         .iter()
         .filter_map(|message| match message {
@@ -71,6 +89,8 @@ pub fn truncate_tool_results(messages: &mut [Message], max_bytes: usize) -> Requ
     if max_bytes == 0 {
         return outcome;
     }
+    // A cap below the notice floor cuts to the floor; judge candidates by it.
+    let max_bytes = max_bytes.max(TRAILER_RESERVED + 1);
     for message in messages {
         let Message::Tool(tool) = message else {
             continue;
@@ -86,7 +106,7 @@ pub fn truncate_tool_results(messages: &mut [Message], max_bytes: usize) -> Requ
                 continue;
             }
             // Leave room for the notice so the result lands near the cap.
-            let budget = max_bytes.max(TRAILER_RESERVED + 1);
+            let budget = max_bytes;
             let original = std::mem::take(text);
             let before = original.len();
             let (cut, _) = apply_tool_result_budget(original.clone(), budget);

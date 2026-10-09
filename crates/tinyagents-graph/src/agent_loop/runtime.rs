@@ -116,11 +116,13 @@ impl<State: Send + Sync, Ctx: Send + Sync> ModelBaseCall<State, Ctx>
 {
     fn call<'a>(
         &'a self,
-        _ctx: &'a mut RunContext<Ctx>,
+        ctx: &'a mut RunContext<Ctx>,
         state: &'a State,
         request: ModelRequest,
     ) -> BoxModelFuture<'a> {
         Box::pin(async move {
+            // Reached only when the wrap onion elected to call the provider.
+            ctx.mark_provider_started();
             self.model
                 .invoke(state, request)
                 .await
@@ -304,6 +306,8 @@ where
             tinyagents_harness::limits::LimitBehavior::StopWithPartial
         ) {
             loop_state.finished = true;
+            loop_state.limit_stop = true;
+            loop_state.limit_kind = Some(tinyagents_harness::events::LimitKind::ModelCalls);
             if loop_state.final_text.is_none() {
                 loop_state.final_text = Some(last_assistant_text(&loop_state.messages));
             }
@@ -425,15 +429,27 @@ where
         model: model_name.clone(),
     });
     status.set_last_event(started_record.id);
+    status.active_model_call = Some(call_id.clone());
+    ctx.active_model_call = Some(call_id.clone());
+    ctx.begin_model_call();
 
     let base = DirectModelBase {
         model: binding.model.as_ref(),
     };
-    let (mut response, wrap_control) = harness
+    let wrapped = match harness
         .middleware()
         .run_wrapped_model(ctx, app_state, request, &base)
-        .await?
-        .into_response_with_control();
+        .await
+    {
+        Ok(wrapped) => wrapped,
+        Err(error) => {
+            status.active_model_call = None;
+            ctx.active_model_call = None;
+            ctx.mark_model_call_failed();
+            return Err(error);
+        }
+    };
+    let (mut response, wrap_control) = wrapped.into_response_with_control();
     if let Some(control) = wrap_control {
         ctx.request_control(control);
     }
@@ -441,6 +457,8 @@ where
     run.model_calls += 1;
     run.steps += 1;
     status.model_calls = run.model_calls;
+    status.active_model_call = None;
+    ctx.active_model_call = None;
     if let Some(usage) = response.usage {
         run.usage.record(usage);
         loop_state.usage = run.usage;
@@ -530,7 +548,30 @@ where
         &mut loop_state.messages,
         calls,
     )
-    .await?;
+    .await;
+    let outcome = match outcome {
+        Ok(outcome) => outcome,
+        Err(error)
+            if matches!(
+                harness.policy().limits.behavior,
+                tinyagents_harness::limits::LimitBehavior::StopWithPartial
+            ) && matches!(error, TinyAgentsError::LimitExceeded(_))
+                && ctx.peek_last_limit()
+                    == Some(tinyagents_harness::events::LimitKind::ToolCalls) =>
+        {
+            // Only the tool-cap admission announces `LimitReached(ToolCalls)`
+            // (and `record_tool_call` cleared any earlier kind first), so a
+            // `LimitExceeded` raised by middleware is not a partial stop.
+            loop_state.limit_stop = true;
+            loop_state.limit_kind = Some(tinyagents_harness::events::LimitKind::ToolCalls);
+            loop_state.finished = true;
+            if loop_state.final_text.is_none() {
+                loop_state.final_text = Some(last_assistant_text(&loop_state.messages));
+            }
+            return Ok(goto(loop_state, node::SETTLE));
+        }
+        Err(error) => return Err(error),
+    };
     loop_state.tool_calls = run.tool_calls;
     loop_state.executed_tools = run.executed_tools.clone();
     let _ = outcome;

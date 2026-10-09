@@ -28,9 +28,11 @@
 //!
 //! Each list shows its [`MAX_LISTED_FILES`] most recently touched files and a
 //! `…and K more` line for the rest (the count carries across compactions).
-//! Path strings are sanitized before they are stored: control characters
-//! become `?` and `<` / `>` become `&lt;` / `&gt;`, so a hostile file name can
-//! neither forge a section nor add lines to one.
+//! Path strings are escaped injectively before they are stored (`&`, `<`, `>`,
+//! control characters and the marker's `…`), so a hostile file name can neither
+//! forge a section, add lines to one, nor pass for the `…and K more` line. The
+//! omitted counts are approximate: collapsed paths keep no identity, so a path
+//! touched again after being collapsed is counted in both places.
 
 use tinyinference_llm::message::Message;
 use tinyinference_llm::tool::ToolCall;
@@ -93,19 +95,25 @@ fn classify_tool(name: &str) -> Touch {
 }
 
 /// Neutralizes what would let a path break out of its list line or section.
+///
+/// The encoding is injective (distinct paths stay distinct, since the path's
+/// rendering doubles as its identity): `&` becomes `&amp;`, `<` / `>` become
+/// `&lt;` / `&gt;`, a control character becomes `&#N;`, and the ellipsis that
+/// opens the `…and K more` marker becomes `&#8230;`, so no path can pass for
+/// that marker.
 fn sanitize_path(path: &str) -> String {
-    path.chars()
-        .take(MAX_PATH_CHARS)
-        .map(|c| {
-            if c.is_control() {
-                "?".to_string()
-            } else {
-                c.to_string()
-            }
-        })
-        .collect::<String>()
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
+    let mut out = String::new();
+    for c in path.chars().take(MAX_PATH_CHARS) {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '…' => out.push_str("&#8230;"),
+            c if c.is_control() => out.push_str(&format!("&#{};", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 /// Files touched by the tool calls of a stretch of conversation, each list in
@@ -120,13 +128,17 @@ pub struct FileOperations {
     modified_omitted: usize,
 }
 
-fn touch(list: &mut Vec<String>, path: &str) {
-    let path = sanitize_path(path);
+/// Moves an already-encoded `path` to the end of `list`.
+fn touch_encoded(list: &mut Vec<String>, path: &str) {
     if path.is_empty() {
         return;
     }
-    list.retain(|existing| *existing != path);
-    list.push(path);
+    list.retain(|existing| existing != path);
+    list.push(path.to_string());
+}
+
+fn touch(list: &mut Vec<String>, path: &str) {
+    touch_encoded(list, &sanitize_path(path));
 }
 
 impl FileOperations {
@@ -142,14 +154,16 @@ impl FileOperations {
 
     /// Unions `other` into `self`; `other`'s files count as more recent.
     pub fn merge(&mut self, other: &FileOperations) {
+        // `other`'s paths are already encoded; encoding them again would
+        // change them on every merge.
         for path in &other.read {
-            self.add_read(path);
+            touch_encoded(&mut self.read, path);
         }
         for path in &other.modified {
-            self.add_modified(path);
+            touch_encoded(&mut self.modified, path);
         }
-        self.read_omitted += other.read_omitted;
-        self.modified_omitted += other.modified_omitted;
+        self.read_omitted = self.read_omitted.saturating_add(other.read_omitted);
+        self.modified_omitted = self.modified_omitted.saturating_add(other.modified_omitted);
     }
 
     /// Files that were modified, oldest first.
@@ -246,7 +260,7 @@ pub fn extract_file_operations(
 /// `…and K more` line when any were left out.
 fn render_list(paths: &[&str], already_omitted: usize) -> String {
     let shown = &paths[paths.len().saturating_sub(MAX_LISTED_FILES)..];
-    let omitted = already_omitted + (paths.len() - shown.len());
+    let omitted = already_omitted.saturating_add(paths.len() - shown.len());
     let mut lines = shown.join("\n");
     if omitted > 0 {
         lines.push_str(&format!("\n{OMITTED_PREFIX}{omitted}{OMITTED_SUFFIX}"));
@@ -279,38 +293,46 @@ pub fn append_file_sections(summary: &str, ops: &FileOperations) -> String {
     text
 }
 
-/// Splits the file sections [`append_file_sections`] wrote off `text`,
-/// returning the remaining body and the operations they listed (including the
-/// `…and K more` counts). Text without sections comes back unchanged with an
-/// empty set.
+/// Splits the file sections [`append_file_sections`] wrote off the end of
+/// `text`, returning the remaining body and the operations they listed
+/// (including the `…and K more` counts). Only the trailer is parsed — the
+/// `<modified-files>` section last, the `<read-files>` section before it, each
+/// set off by a blank line, with trailing whitespace after it tolerated — so
+/// delimiters in the summary prose are left alone.
+/// Text without such a trailer comes back byte-for-byte unchanged with an empty
+/// set.
 pub fn split_file_sections(text: &str) -> (String, FileOperations) {
     let mut ops = FileOperations::default();
-    let mut body = text.to_string();
+    let mut body = text;
     for (open, close, is_modified) in [
-        (READ_OPEN, READ_CLOSE, false),
         (MODIFIED_OPEN, MODIFIED_CLOSE, true),
+        (READ_OPEN, READ_CLOSE, false),
     ] {
-        while let Some(start) = body.find(open) {
-            let list_start = start + open.len();
-            let Some(len) = body[list_start..].find(close) else {
-                break;
-            };
-            for line in body[list_start..list_start + len].lines() {
-                let omitted = line
-                    .strip_prefix(OMITTED_PREFIX)
-                    .and_then(|rest| rest.strip_suffix(OMITTED_SUFFIX))
-                    .and_then(|count| count.parse::<usize>().ok());
-                match (omitted, is_modified) {
-                    (Some(n), true) => ops.modified_omitted += n,
-                    (Some(n), false) => ops.read_omitted += n,
-                    (None, true) => ops.add_modified(line),
-                    (None, false) => ops.add_read(line),
-                }
+        let Some(head) = body.trim_end().strip_suffix(close) else {
+            continue;
+        };
+        let Some(start) = head.rfind(open) else {
+            continue;
+        };
+        let Some(prose) = head[..start].strip_suffix("\n\n") else {
+            continue;
+        };
+        for line in head[start + open.len()..].lines() {
+            let omitted = line
+                .strip_prefix(OMITTED_PREFIX)
+                .and_then(|rest| rest.strip_suffix(OMITTED_SUFFIX))
+                .and_then(|count| count.parse::<usize>().ok());
+            match (omitted, is_modified) {
+                (Some(n), true) => ops.modified_omitted = ops.modified_omitted.saturating_add(n),
+                (Some(n), false) => ops.read_omitted = ops.read_omitted.saturating_add(n),
+                // The listed lines are already encoded.
+                (None, true) => touch_encoded(&mut ops.modified, line),
+                (None, false) => touch_encoded(&mut ops.read, line),
             }
-            body.replace_range(start..list_start + len + close.len(), "");
         }
+        body = prose;
     }
-    (body.trim().to_string(), ops)
+    (body.to_string(), ops)
 }
 
 #[cfg(test)]

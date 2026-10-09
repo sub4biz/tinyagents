@@ -57,6 +57,7 @@ fn smoke_event_sink_records_events() {
 
     let _ = sink.emit(AgentEvent::RunCompleted {
         run_id: run_id.clone(),
+        outcome: None,
     });
     assert_eq!(recorder.len(), 2);
 
@@ -102,6 +103,7 @@ fn smoke_event_journal_replay() {
     });
     journal.append(AgentEvent::RunCompleted {
         run_id: run_id.clone(),
+        outcome: None,
     });
 
     assert_eq!(journal.len(), 2);
@@ -142,6 +144,7 @@ fn completed_events_deserialize_without_started_at_ms() {
 
     // A populated start time round-trips.
     let event = AgentEvent::ToolCompleted {
+        parent_call_id: None,
         call_id: crate::ids::CallId::new("t2"),
         tool_name: "lookup".to_string(),
         started_at_ms: Some(1_704_067_199_000),
@@ -415,6 +418,7 @@ fn failure_variants_exist_and_carry_stable_kind_strings() {
     use crate::ids::CallId;
 
     let tool_failed = AgentEvent::ToolFailed {
+        parent_call_id: None,
         call_id: CallId::new("call-1"),
         tool_name: "search".into(),
         started_at_ms: Some(1_000),
@@ -445,6 +449,7 @@ fn failure_variants_round_trip_through_serde() {
 
     for event in [
         AgentEvent::ToolFailed {
+            parent_call_id: None,
             call_id: CallId::new("call-1"),
             tool_name: "search".into(),
             started_at_ms: None,
@@ -537,6 +542,7 @@ fn tool_completed_metadata_is_optional_and_round_trips() {
     ));
 
     let event = AgentEvent::ToolCompleted {
+        parent_call_id: None,
         call_id: crate::ids::CallId::new("t2"),
         tool_name: "lookup".to_string(),
         started_at_ms: None,
@@ -583,4 +589,100 @@ fn emit_delivers_normally_once_a_listener_subscribes_after_a_quiet_run() {
     assert_eq!(delivered.offset, 1);
     assert_eq!(recorder.events().len(), 1);
     assert_eq!(recorder.events()[0].offset, 1);
+}
+
+#[test]
+fn terminal_and_lifecycle_events_have_stable_kinds() {
+    assert_eq!(AgentEvent::TurnStarted { turn: 1 }.kind(), "turn.started");
+    assert_eq!(
+        AgentEvent::TurnCompleted {
+            turn: 1,
+            tool_result_count: 0,
+            tool_call_ids: vec![]
+        }
+        .kind(),
+        "turn.completed"
+    );
+    assert_eq!(
+        AgentEvent::MessageAppended {
+            role: "user".into(),
+            index: 0,
+            call_id: None,
+            message: None
+        }
+        .kind(),
+        "message.appended"
+    );
+}
+
+#[test]
+fn run_events_with_outcomes_round_trip_and_old_payloads_still_parse() {
+    use crate::terminal::{TerminalOutcome, TerminalReason};
+    let failed = AgentEvent::RunFailed {
+        run_id: RunId::new("r"),
+        error: "boom".into(),
+        outcome: Some(TerminalOutcome::new(TerminalReason::ToolFailed, "boom")),
+    };
+    let json = serde_json::to_value(&failed).unwrap();
+    assert_eq!(json["outcome"]["reason"], "tool_failed");
+    assert_eq!(serde_json::from_value::<AgentEvent>(json).unwrap(), failed);
+
+    // Journals written before the field existed deserialize with `None`.
+    let old: AgentEvent =
+        serde_json::from_value(serde_json::json!({"kind": "run_completed", "run_id": "r"}))
+            .unwrap();
+    assert!(matches!(
+        old,
+        AgentEvent::RunCompleted { outcome: None, .. }
+    ));
+    let old: AgentEvent = serde_json::from_value(
+        serde_json::json!({"kind": "queued_message_applied", "lane": "steer", "count": 2}),
+    )
+    .unwrap();
+    assert!(matches!(
+        old,
+        AgentEvent::QueuedMessageApplied {
+            count: 2,
+            first_index: 0,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn tool_events_serialise_parent_call_id_only_when_nested() {
+    use crate::ids::CallId;
+
+    let model_issued = AgentEvent::ToolStarted {
+        call_id: CallId::new("p1"),
+        tool_name: "caller".to_string(),
+        input: None,
+        parent_call_id: None,
+    };
+    let nested = AgentEvent::ToolStarted {
+        call_id: CallId::new("p1/1"),
+        tool_name: "leaf".to_string(),
+        input: None,
+        parent_call_id: Some(CallId::new("p1")),
+    };
+
+    let plain = serde_json::to_value(&model_issued).unwrap();
+    assert!(
+        plain.to_string().find("parent_call_id").is_none(),
+        "{plain}"
+    );
+    let tagged = serde_json::to_value(&nested).unwrap();
+    assert!(
+        tagged.to_string().contains(r#""parent_call_id":"p1""#),
+        "{tagged}"
+    );
+    assert_eq!(
+        serde_json::from_value::<AgentEvent>(tagged).unwrap(),
+        nested
+    );
+    // Events journalled before the field existed still deserialise.
+    assert_eq!(
+        serde_json::from_value::<AgentEvent>(plain).unwrap(),
+        model_issued
+    );
 }

@@ -226,12 +226,19 @@ pub fn record_approved<Ctx: Send + Sync>(
 
 async fn run_approved<State: Send + Sync, Ctx: Send + Sync>(
     resolver: &dyn ApprovalResolver<Ctx>,
-    ctx: &mut RunContext<Ctx>,
+    prompt_lock: &tokio::sync::Mutex<()>,
+    ctx: &RunContext<Ctx>,
     state: &State,
     call: ToolCall,
     next: ToolHandler<'_, State, Ctx>,
 ) -> Result<MiddlewareToolOutcome> {
-    match resolver.resolve(ctx, &call).await {
+    let resolution = {
+        // Calls of one batch overlap, but a host routes one prompt at a time
+        // (e.g. per chat thread), so only the interactive part is serialised.
+        let _prompting = prompt_lock.lock().await;
+        resolver.resolve(ctx, &call).await
+    };
+    match resolution {
         ApprovalResolution::Deny { reason } => {
             Ok(MiddlewareToolOutcome::Result(ToolResult::error(reason)))
         }
@@ -247,12 +254,19 @@ async fn run_approved<State: Send + Sync, Ctx: Send + Sync>(
 pub struct ApprovalGateMiddleware<Ctx: Send + Sync = ()> {
     label: &'static str,
     resolver: Arc<dyn ApprovalResolver<Ctx>>,
+    /// Serialises [`ApprovalResolver::resolve`] across the overlapping calls
+    /// of a concurrent batch. Calls that need no approval never take it.
+    prompt_lock: tokio::sync::Mutex<()>,
 }
 
 impl<Ctx: Send + Sync> ApprovalGateMiddleware<Ctx> {
     /// Creates the middleware under a stable event `label`.
     pub fn new(label: &'static str, resolver: Arc<dyn ApprovalResolver<Ctx>>) -> Self {
-        Self { label, resolver }
+        Self {
+            label,
+            resolver,
+            prompt_lock: tokio::sync::Mutex::new(()),
+        }
     }
 }
 
@@ -266,7 +280,7 @@ impl<State: Send + Sync, Ctx: Send + Sync> ToolMiddleware<State, Ctx>
 
     async fn wrap_tool(
         &self,
-        ctx: &mut RunContext<Ctx>,
+        ctx: &RunContext<Ctx>,
         state: &State,
         call: ToolCall,
         next: ToolHandler<'_, State, Ctx>,
@@ -274,7 +288,15 @@ impl<State: Send + Sync, Ctx: Send + Sync> ToolMiddleware<State, Ctx>
         if !self.resolver.requires_approval(ctx, &call).await {
             return next.run(ctx, state, call).await;
         }
-        run_approved(self.resolver.as_ref(), ctx, state, call, next).await
+        run_approved(
+            self.resolver.as_ref(),
+            &self.prompt_lock,
+            ctx,
+            state,
+            call,
+            next,
+        )
+        .await
     }
 }
 
@@ -299,6 +321,9 @@ pub struct ToolPolicyGateMiddleware<Ctx: Send + Sync = ()> {
     gate: ToolPolicyGate<Ctx>,
     resolver: Option<Arc<dyn ApprovalResolver<Ctx>>>,
     render: DenialRenderer,
+    /// Serialises approval prompts across the overlapping calls of a
+    /// concurrent batch; calls the policy allows or denies never take it.
+    prompt_lock: tokio::sync::Mutex<()>,
 }
 
 impl<Ctx: Send + Sync> ToolPolicyGateMiddleware<Ctx> {
@@ -308,6 +333,7 @@ impl<Ctx: Send + Sync> ToolPolicyGateMiddleware<Ctx> {
             gate: ToolPolicyGate::new(policy),
             resolver: None,
             render: Arc::new(default_denial),
+            prompt_lock: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -335,15 +361,23 @@ impl<State: Send + Sync, Ctx: Send + Sync> ToolMiddleware<State, Ctx>
 
     async fn wrap_tool(
         &self,
-        ctx: &mut RunContext<Ctx>,
+        ctx: &RunContext<Ctx>,
         state: &State,
         call: ToolCall,
         next: ToolHandler<'_, State, Ctx>,
     ) -> Result<MiddlewareToolOutcome> {
-        let verdict = self
-            .gate
-            .evaluate(ctx, &call, false, self.resolver.as_deref())
-            .await;
+        // Evaluate without the resolver first so only a call that actually
+        // needs approval waits on the prompt lock; the rest stay concurrent.
+        let mut verdict = self.gate.evaluate(ctx, &call, false, None).await;
+        if let (GateVerdict::Blocked(PolicyDecision::RequireApproval { .. }), Some(resolver)) =
+            (&verdict, self.resolver.as_deref())
+        {
+            let _prompting = self.prompt_lock.lock().await;
+            verdict = match resolver.resolve(ctx, &call).await {
+                ApprovalResolution::Allow { ticket } => GateVerdict::Proceed { ticket },
+                ApprovalResolution::Deny { reason } => GateVerdict::Refused { reason },
+            };
+        }
         match verdict {
             GateVerdict::Proceed { ticket } => {
                 let outcome = next.run(ctx, state, call).await?;

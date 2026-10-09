@@ -123,6 +123,7 @@ Event kinds should include:
 
 - `run.started`
 - `run.completed`
+- `turn.started` / `turn.completed` / `message.appended` (see [terminal outcome and turn lifecycle](terminal-outcome.md))
 - `run.failed`
 - `model.started`
 - `model.delta`

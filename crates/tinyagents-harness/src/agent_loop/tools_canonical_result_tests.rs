@@ -190,15 +190,21 @@ fn lifecycle_middleware_no_longer_forces_the_serial_route() {
     // lifecycle middleware has nothing left to mutate once execution
     // starts. Only tool-*wrap* middleware (bypassed entirely by the
     // concurrent path) still forces serial execution.
-    assert!(should_execute_tools_concurrently(2, true, 0));
+    assert!(should_execute_tools_concurrently(2, true, true));
 }
 
 #[test]
-fn tool_wrap_middleware_still_forces_the_serial_route() {
-    // The concurrent path drives each tool directly, skipping the
-    // tool-wrap onion; a registered `ToolMiddleware` must still force
-    // serial execution or it would silently never run.
-    assert!(!should_execute_tools_concurrently(2, true, 1));
+fn concurrent_safe_tool_wrap_middleware_keeps_the_concurrent_route() {
+    // The wrap onion runs inside each concurrent future (`wrap_tool` takes a
+    // shared `&RunContext`), so a registered `ToolMiddleware` no longer forces
+    // serial execution on its own.
+    assert!(should_execute_tools_concurrently(2, true, true));
+}
+
+#[test]
+fn a_wrap_that_is_not_concurrent_safe_forces_the_serial_route() {
+    // `ToolMiddleware::concurrent_safe() == false` is the escape hatch.
+    assert!(!should_execute_tools_concurrently(2, true, false));
 }
 
 #[test]

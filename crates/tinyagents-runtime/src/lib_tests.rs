@@ -80,6 +80,7 @@ impl Tool for RegisteredTool {
 
 fn outcome(history: Vec<Message>) -> DriverOutcome {
     DriverOutcome {
+        outcome: None,
         history,
         output: Some("ok".into()),
         partial: None,
@@ -599,12 +600,14 @@ async fn persistence_failure_rolls_back_and_a_partial_never_falls_back_to_two_wr
 
     let (locator, history) = locator(None);
     let partial = DriverOutcome {
+        outcome: None,
         history: vec![Message::assistant("recoverable")],
         output: None,
         partial: Some(crate::TranscriptPartial::new("display only")),
         interrupted: true,
     };
     let mut session = SessionBuilder::new(Arc::new(Driver::new(vec![Err(DriverFailure {
+        outcome: None,
         error: RuntimeError::Driver("interrupted".into()),
         partial: Some(partial),
     })])))
@@ -766,12 +769,14 @@ async fn file_history_commits_partial_model_history_and_display_only_partial_tog
         ..Default::default()
     });
     let partial = DriverOutcome {
+        outcome: None,
         history: vec![Message::assistant("recoverable")],
         output: None,
         partial: Some(crate::TranscriptPartial::new("display partial")),
         interrupted: true,
     };
     let mut session = SessionBuilder::new(Arc::new(Driver::new(vec![Err(DriverFailure {
+        outcome: None,
         error: RuntimeError::Driver("interrupted".into()),
         partial: Some(partial),
     })])))
@@ -864,12 +869,14 @@ async fn partial_usage_error_leaves_the_session_and_target_entirely_uncommitted(
         ..Default::default()
     });
     let partial = DriverOutcome {
+        outcome: None,
         history: vec![Message::assistant("recoverable")],
         output: None,
         partial: Some(crate::TranscriptPartial::new("display partial")),
         interrupted: true,
     };
     let mut session = SessionBuilder::new(Arc::new(Driver::new(vec![Err(DriverFailure {
+        outcome: None,
         error: RuntimeError::Driver("driver interrupted".into()),
         partial: Some(partial),
     })])))
@@ -2023,6 +2030,7 @@ async fn receipt_reports_a_compaction_as_replacement_not_an_append_range() {
 async fn failure_and_cancellation_do_not_run_after_commit_and_emit_one_terminal() {
     let (failure_hook, events) = hook(vec![]);
     let mut failed = SessionBuilder::new(Arc::new(Driver::new(vec![Err(DriverFailure {
+        outcome: None,
         error: RuntimeError::Driver("no".into()),
         partial: None,
     })])))
@@ -2433,6 +2441,7 @@ fn session_turn_options(resume: ResumeMode, thread: &str) -> TurnOptions {
 
 fn session_outcome(history: Vec<Message>, output: &str) -> DriverOutcome {
     DriverOutcome {
+        outcome: None,
         history,
         output: Some(output.into()),
         partial: None,
@@ -4191,6 +4200,181 @@ async fn refreshing_initial_prefix_accepts_an_identical_frozen_preparation_after
 #[path = "lib_prefix_refresh_tests.rs"]
 mod prefix_refresh_tests;
 
+struct OutcomeHook {
+    outcomes: Mutex<Vec<tinyagents_harness::terminal::TerminalOutcome>>,
+    order: Mutex<Vec<&'static str>>,
+}
+
+#[async_trait]
+impl SessionHooks for OutcomeHook {
+    async fn before_turn(
+        &self,
+        _: &mut SessionTurnRequest,
+        _: &mut TurnOptions,
+        _: SessionStateView<'_>,
+    ) -> Result<TurnPreparation, RuntimeError> {
+        Ok(TurnPreparation::default())
+    }
+    async fn before_commit(
+        &self,
+        _: &SessionTurnOutcome,
+        _: &crate::TranscriptTurnOptions,
+    ) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn on_terminal_outcome(
+        &self,
+        outcome: tinyagents_harness::terminal::TerminalOutcome,
+    ) -> Result<(), RuntimeError> {
+        self.order.lock().unwrap().push("outcome");
+        self.outcomes.lock().unwrap().push(outcome);
+        Ok(())
+    }
+    async fn on_terminal(&self, _: SessionTerminal) -> Result<(), RuntimeError> {
+        self.order.lock().unwrap().push("terminal");
+        Ok(())
+    }
+}
+
+/// Waits (bounded) until the detached terminal task has recorded `count`
+/// outcomes, instead of relying on scheduler order.
+async fn wait_for_outcomes(hook: &OutcomeHook, count: usize) {
+    for _ in 0..500 {
+        if hook.outcomes.lock().unwrap().len() >= count {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+}
+
+/// Waits (bounded) until `count` hook callbacks have been recorded in order.
+async fn wait_for_order(hook: &OutcomeHook, count: usize) {
+    for _ in 0..500 {
+        if hook.order.lock().unwrap().len() >= count {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+}
+
+fn outcome_hook() -> Arc<OutcomeHook> {
+    Arc::new(OutcomeHook {
+        outcomes: Mutex::default(),
+        order: Mutex::default(),
+    })
+}
+
+#[tokio::test]
+async fn driver_failures_deliver_their_typed_outcome_before_the_terminal() {
+    use tinyagents_harness::terminal::{TerminalClass, TerminalOutcome, TerminalReason};
+    let hook = outcome_hook();
+    let typed = TerminalOutcome::new(TerminalReason::Timeout, "deadline");
+    let mut session = SessionBuilder::new(Arc::new(Driver::new(vec![Err(DriverFailure {
+        outcome: Some(typed.clone()),
+        error: RuntimeError::Driver("deadline".into()),
+        partial: None,
+    })])))
+    .hooks(hook.clone())
+    .build()
+    .unwrap();
+    let _ = session
+        .turn(
+            SessionTurnRequest::new(Message::user("x")),
+            TurnOptions::default(),
+        )
+        .await;
+    wait_for_outcomes(&hook, 1).await;
+    wait_for_order(&hook, 2).await;
+    assert_eq!(hook.outcomes.lock().unwrap().as_slice(), [typed]);
+    assert_eq!(
+        hook.order.lock().unwrap().as_slice(),
+        ["outcome", "terminal"]
+    );
+
+    // An untyped failure falls back to a derived Failure-class outcome.
+    let hook = outcome_hook();
+    let mut session = SessionBuilder::new(Arc::new(Driver::new(vec![Err(DriverFailure {
+        outcome: None,
+        error: RuntimeError::Driver("plain".into()),
+        partial: None,
+    })])))
+    .hooks(hook.clone())
+    .build()
+    .unwrap();
+    let _ = session
+        .turn(
+            SessionTurnRequest::new(Message::user("x")),
+            TurnOptions::default(),
+        )
+        .await;
+    wait_for_outcomes(&hook, 1).await;
+    let outcomes = hook.outcomes.lock().unwrap();
+    assert_eq!(outcomes.len(), 1);
+    assert_eq!(outcomes[0].class, TerminalClass::Failure);
+}
+
+#[tokio::test]
+async fn completed_turns_report_a_completed_outcome() {
+    use tinyagents_harness::terminal::TerminalReason;
+    let hook = outcome_hook();
+    let mut session = SessionBuilder::new(Arc::new(Driver::new(vec![Ok(outcome(vec![
+        Message::assistant("hi"),
+    ]))])))
+    .hooks(hook.clone())
+    .build()
+    .unwrap();
+    session
+        .turn(
+            SessionTurnRequest::new(Message::user("x")),
+            TurnOptions::default(),
+        )
+        .await
+        .unwrap();
+    wait_for_outcomes(&hook, 1).await;
+    let outcomes = hook.outcomes.lock().unwrap();
+    assert_eq!(outcomes.len(), 1);
+    assert_eq!(outcomes[0].reason, TerminalReason::Completed);
+}
+
+#[test]
+fn session_terminal_derives_an_outcome() {
+    use tinyagents_harness::terminal::TerminalClass;
+    assert_eq!(
+        SessionTerminal::Cancelled.outcome().class,
+        TerminalClass::Cancellation
+    );
+    let failed = SessionTerminal::Failed("x".into()).outcome();
+    assert_eq!(failed.class, TerminalClass::Failure);
+    assert_eq!(failed.message, "x");
+}
+
+#[tokio::test]
+async fn a_drivers_typed_success_outcome_is_not_flattened_to_completed() {
+    use tinyagents_harness::terminal::{TerminalOutcome, TerminalReason};
+    let hook = outcome_hook();
+    let capped = TerminalOutcome::limit_reached(
+        Some(tinyagents_harness::events::LimitKind::ModelCalls),
+        "stopped with the partial run",
+    );
+    let mut driver_outcome = outcome(vec![Message::assistant("partial")]);
+    driver_outcome.outcome = Some(capped.clone());
+    let mut session = SessionBuilder::new(Arc::new(Driver::new(vec![Ok(driver_outcome)])))
+        .hooks(hook.clone())
+        .build()
+        .unwrap();
+    session
+        .turn(
+            SessionTurnRequest::new(Message::user("x")),
+            TurnOptions::default(),
+        )
+        .await
+        .unwrap();
+    wait_for_outcomes(&hook, 1).await;
+    let outcomes = hook.outcomes.lock().unwrap();
+    assert_eq!(outcomes.as_slice(), [capped]);
+    assert_ne!(outcomes[0].reason, TerminalReason::Completed);
+}
+
 #[test]
 fn tool_snapshot_retaining_keeps_matching_declarations_and_exactness() {
     let spec = |name: &str| ToolSpec {
@@ -4206,4 +4390,90 @@ fn tool_snapshot_retaining_keeps_matching_declarations_and_exactness() {
     assert_eq!(names, ["keep"]);
     assert!(narrowed.is_exact(), "a one-off snapshot stays one-off");
     assert_eq!(snapshot.specs().len(), 2, "the source is untouched");
+}
+
+struct SlowOutcomeHook {
+    started: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Notify>,
+    terminal: Arc<tokio::sync::Notify>,
+    terminals: Mutex<Vec<SessionTerminal>>,
+}
+
+#[async_trait]
+impl SessionHooks for SlowOutcomeHook {
+    async fn before_turn(
+        &self,
+        _: &mut SessionTurnRequest,
+        _: &mut TurnOptions,
+        _: SessionStateView<'_>,
+    ) -> Result<TurnPreparation, RuntimeError> {
+        Err(RuntimeError::Cancelled)
+    }
+
+    async fn before_commit(
+        &self,
+        _: &SessionTurnOutcome,
+        _: &TranscriptTurnOptions,
+    ) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+
+    async fn after_commit(&self, _: CommitReceipt) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+
+    async fn on_terminal_outcome(
+        &self,
+        _: tinyagents_harness::terminal::TerminalOutcome,
+    ) -> Result<(), RuntimeError> {
+        self.started.notify_waiters();
+        self.release.notified().await;
+        Ok(())
+    }
+
+    async fn on_terminal(&self, terminal: SessionTerminal) -> Result<(), RuntimeError> {
+        self.terminals.lock().unwrap().push(terminal);
+        self.terminal.notify_waiters();
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn dropping_the_turn_while_the_outcome_hook_is_pending_still_delivers_on_terminal() {
+    let started = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let terminal = Arc::new(tokio::sync::Notify::new());
+    let hook = Arc::new(SlowOutcomeHook {
+        started: started.clone(),
+        release: release.clone(),
+        terminal: terminal.clone(),
+        terminals: Mutex::new(Vec::new()),
+    });
+    let (locator, _history) = locator(None);
+    let mut session = SessionBuilder::new(Arc::new(Driver::new(vec![Ok(outcome(vec![
+        Message::assistant("never"),
+    ]))])))
+    .codec(Arc::new(Codec::default()))
+    .transcript(locator, "agent", meta())
+    .hooks(hook.clone())
+    .build()
+    .unwrap();
+    let observed_terminal = terminal.notified();
+    let observed_start = started.notified();
+    let turn = tokio::spawn(async move {
+        session
+            .turn(
+                SessionTurnRequest::new(Message::user("x")),
+                TurnOptions::default(),
+            )
+            .await
+    });
+    observed_start.await;
+    turn.abort();
+    let _ = turn.await;
+    release.notify_one();
+    tokio::time::timeout(std::time::Duration::from_secs(5), observed_terminal)
+        .await
+        .expect("on_terminal must still be delivered");
+    assert_eq!(hook.terminals.lock().unwrap().len(), 1);
 }

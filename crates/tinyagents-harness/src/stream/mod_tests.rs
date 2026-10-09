@@ -234,6 +234,7 @@ mod project {
     #[test]
     fn every_other_event_falls_through_to_debug_and_keeps_its_payload() {
         let event = AgentEvent::ToolStarted {
+            parent_call_id: None,
             call_id: CallId::new("c9"),
             tool_name: "search".into(),
             input: None,
@@ -320,6 +321,7 @@ mod project {
             AgentEvent::MemorySaved,
             AgentEvent::RunCompleted {
                 run_id: RunId::new("r1"),
+                outcome: None,
             },
         ] {
             let mode = projected_mode(&event);

@@ -75,6 +75,7 @@ fn latency_metrics_correlate_started_and_completed_by_call_id() {
             3,
             1_150,
             AgentEvent::ToolStarted {
+                parent_call_id: None,
                 call_id: CallId::new("t1"),
                 tool_name: "search".into(),
                 input: None,
@@ -85,6 +86,7 @@ fn latency_metrics_correlate_started_and_completed_by_call_id() {
             4,
             1_200,
             AgentEvent::ToolCompleted {
+                parent_call_id: None,
                 call_id: CallId::new("t1"),
                 tool_name: "search".into(),
                 started_at_ms: None,
@@ -102,6 +104,7 @@ fn latency_metrics_correlate_started_and_completed_by_call_id() {
             1_500,
             AgentEvent::RunCompleted {
                 run_id: RunId::new("r1"),
+                outcome: None,
             },
         ),
     ];
@@ -185,6 +188,7 @@ async fn journal_read_filtered_selects_by_event_kind() {
             1,
             0,
             AgentEvent::ToolStarted {
+                parent_call_id: None,
                 call_id: CallId::new("t1"),
                 tool_name: "x".into(),
                 input: None,
@@ -358,6 +362,7 @@ fn redacting_sink_with_no_secrets_is_pass_through() {
         0,
         AgentEvent::RunCompleted {
             run_id: RunId::new("r"),
+            outcome: None,
         },
     ));
     assert_eq!(downstream.events().len(), 1);

@@ -30,7 +30,7 @@ use std::path::{Path, PathBuf};
 use crate::transcript::{self, DisplayRecord};
 
 use super::project::{native_tool_round, project_records};
-use super::types::{DisplayItem, SubagentStatus, ToolCallStatus};
+use super::types::{DisplayItem, ToolCallStatus, TranscriptSubagentStatus};
 
 const LOG_PREFIX: &str = "[threads][transcript][subagents]";
 
@@ -221,7 +221,7 @@ fn build_child(
             agent_id,
             task_id,
             call_id: None,
-            status: SubagentStatus::Running,
+            status: TranscriptSubagentStatus::Running,
             request_id: None,
             ts,
             items,
@@ -465,24 +465,24 @@ fn derive_status(
     own: OwnState,
     call_status: Option<ToolCallStatus>,
     call_result: Option<&str>,
-) -> SubagentStatus {
+) -> TranscriptSubagentStatus {
     let result = call_result.map(str::trim_start).unwrap_or_default();
     if is_incomplete_result(result) {
-        return SubagentStatus::Incomplete;
+        return TranscriptSubagentStatus::Incomplete;
     }
     if call_status == Some(ToolCallStatus::Error) {
-        return SubagentStatus::Failed;
+        return TranscriptSubagentStatus::Failed;
     }
     match own {
-        OwnState::Interrupted => SubagentStatus::Interrupted,
-        OwnState::Completed => SubagentStatus::Completed,
+        OwnState::Interrupted => TranscriptSubagentStatus::Interrupted,
+        OwnState::Completed => TranscriptSubagentStatus::Completed,
         OwnState::Unknown
             if call_status == Some(ToolCallStatus::Success)
                 && !result.starts_with(ASYNC_ACCEPTED_PREFIX) =>
         {
-            SubagentStatus::Completed
+            TranscriptSubagentStatus::Completed
         }
-        OwnState::Unknown => SubagentStatus::Running,
+        OwnState::Unknown => TranscriptSubagentStatus::Running,
     }
 }
 

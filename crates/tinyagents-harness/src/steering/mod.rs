@@ -368,8 +368,16 @@ impl SteeringHandle {
 
     /// Drops a model override the model call could not honour, so the run
     /// keeps its current model and the name is not re-checked on every call.
-    pub(crate) fn reject_model_override(&self) {
-        self.lock_model_override().take();
+    ///
+    /// Returns `true` when the override had already been reported as applied
+    /// (`Steered { accepted: true }`), so the caller must not emit a second,
+    /// contradictory outcome for the same command.
+    pub(crate) fn reject_model_override(&self) -> bool {
+        let mut slot = self.lock_model_override();
+        slot.take();
+        self.local
+            .model_override_announced
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Locks the model override, recovering from poisoning.

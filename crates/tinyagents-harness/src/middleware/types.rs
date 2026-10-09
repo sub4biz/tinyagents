@@ -157,6 +157,14 @@ pub struct AgentRun {
     /// (and re-summarizing) everything the compaction already folded. Set by
     /// [`ContextCompressionMiddleware`]'s `after_agent` hook.
     pub compacted_history: Option<Vec<tinyinference_llm::message::Message>>,
+    /// How the run ended, structured (see [`crate::terminal`]). Set by the
+    /// agent loop on every exit path it controls — completion, a
+    /// `StopWithPartial` cap, a pause, a deferral — and by the driver on
+    /// failure, so a host reading a partial run (for example from
+    /// [`PartialRunOutcome`][crate::agent_loop::PartialRunOutcome]) needs no
+    /// string parsing. `None` only while the run is still in flight, or when a
+    /// wrapping middleware replaced the loop.
+    pub terminal: Option<crate::terminal::TerminalOutcome>,
 }
 
 /// Host-only metadata one tool call returned, as recorded on
@@ -266,8 +274,16 @@ pub trait Middleware<State: Send + Sync, Ctx: Send + Sync = ()>: Send + Sync {
         Ok(())
     }
 
-    /// Runs for each streamed [`ToolDelta`] of progress emitted while a tool
-    /// runs.
+    /// Observes each [`ToolDelta`] of progress a tool reported through
+    /// `ToolRunContext::report_progress`.
+    ///
+    /// **Replayed, observe-only.** The hook needs `&mut RunContext`, which the
+    /// executing tool holds, so the loop calls it for a call's deltas, in
+    /// order, *after* the call settles and before `after_tool` and the terminal
+    /// event. The matching `AgentEvent::ToolProgressDetail` was already emitted live,
+    /// so mutating `delta` changes nothing downstream. The replay queue is
+    /// bounded (newest 64 deltas, `content` capped at 4 KiB) and is not filled
+    /// at all for runs without middleware. An `Err` is logged, not propagated.
     async fn on_tool_delta(
         &self,
         _ctx: &mut RunContext<Ctx>,
@@ -287,6 +303,56 @@ pub trait Middleware<State: Send + Sync, Ctx: Send + Sync = ()>: Send + Sync {
         _result: &mut ToolResult,
     ) -> Result<()> {
         Ok(())
+    }
+
+    /// Shared-reference admission check for a **nested** tool call: a tool
+    /// calling another tool through
+    /// [`ToolExecutionContext::call_tool`][crate::tool::ToolExecutionContext::call_tool].
+    ///
+    /// `before_tool` takes `&mut RunContext`, which a running tool cannot lend,
+    /// so it never runs for nested calls. A middleware whose `before_tool` is an
+    /// *enforcement* (an allowlist, a deny mask, an approval gate, a plan-mode
+    /// guard, a host hook) must therefore also implement this method, over the
+    /// same decision, or `call_tool` becomes a way around it. The default
+    /// admits the call, which is right for hooks that only observe or rewrite.
+    ///
+    /// Runs for every registered middleware, in registration order, after
+    /// argument validation and before host authorization; the first `Err`
+    /// refuses the call. A nested call can never be deferred, so a gate that
+    /// would defer or interrupt must fail instead. `call.arguments` are the
+    /// prepared (validated) arguments; `call.id` is the nested id
+    /// (`<parent>/<n>`).
+    ///
+    /// A refusal is returned to the calling tool and is **not** fanned out to
+    /// [`Middleware::on_error`]: that hook needs `&mut RunContext`, which a
+    /// running tool cannot lend, and a refused nested call is a tool-level
+    /// result, not a run failure.
+    async fn check_nested_tool(
+        &self,
+        _ctx: &RunContext<Ctx>,
+        _state: &State,
+        _call: &ToolCall,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    /// Observes the result of a nested tool call, after it ran.
+    ///
+    /// `after_tool` never runs for nested calls (it takes `&mut RunContext`),
+    /// so a middleware that accounts for tool results — a research budget, a
+    /// repeated-failure counter, a result auditor — implements this to see
+    /// them. It cannot rewrite the result. Called for every registered
+    /// middleware, in registration order, once per nested call that produced a
+    /// result (a tool-reported error included; a refused or raised call has no
+    /// result). Interior mutability is the way to keep state: the context is
+    /// shared.
+    async fn observe_nested_result(
+        &self,
+        _ctx: &RunContext<Ctx>,
+        _state: &State,
+        _call: &ToolCall,
+        _result: &ToolResult,
+    ) {
     }
 
     /// Runs when any hook in the stack errors, giving every middleware a chance
@@ -487,7 +553,7 @@ pub trait ToolBaseCall<State: Send + Sync, Ctx: Send + Sync>: Send + Sync {
     /// Invokes the wrapped tool with the (possibly middleware-mutated) `call`.
     fn call<'a>(
         &'a self,
-        ctx: &'a mut RunContext<Ctx>,
+        ctx: &'a RunContext<Ctx>,
         state: &'a State,
         call: ToolCall,
     ) -> BoxToolFuture<'a>;
@@ -690,12 +756,37 @@ pub trait ToolMiddleware<State: Send + Sync, Ctx: Send + Sync = ()>: Send + Sync
     /// `MiddlewareStarted`/`MiddlewareCompleted` events.
     fn name(&self) -> &str;
 
+    /// Whether this wrap tolerates **overlapping** invocations: the calls of
+    /// one multi-call tool batch each run the whole wrap onion at the same
+    /// time, on a shared `&RunContext`.
+    ///
+    /// Defaults to `true`, because `wrap_tool` only receives `&RunContext` and
+    /// so can do no more than read it, emit events, request control, and use
+    /// interior-mutable handles it owns. Return `false` when the wrap holds
+    /// state that must see one call at a time (a non-reentrant lock held
+    /// across `next.run`, a strictly ordered audit log, a single-slot
+    /// resource): if *any* registered wrap returns `false`, the harness runs
+    /// every multi-call batch serially, in call order, exactly as before the
+    /// wrap onion became concurrent.
+    ///
+    /// In concurrent mode every `ToolStarted` event is emitted at admission,
+    /// before any wrap runs, so never infer the "current call" from event
+    /// order; use the `call` argument and the `call_id` on the wrap's
+    /// `MiddlewareStarted`/`MiddlewareCompleted` events.
+    fn concurrent_safe(&self) -> bool {
+        true
+    }
+
     /// Wraps the inner tool pipeline. Call `next.run(ctx, state, call)` to
     /// proceed (zero or more times), or return a [`MiddlewareToolOutcome`]
     /// without calling it to short-circuit.
+    ///
+    /// `ctx` is shared (`&RunContext`) because the calls of a batch may run
+    /// this method concurrently; see [`Self::concurrent_safe`]. Events
+    /// (`ctx.emit`) and control requests (`ctx.request_control`) take `&self`.
     async fn wrap_tool(
         &self,
-        ctx: &mut RunContext<Ctx>,
+        ctx: &RunContext<Ctx>,
         state: &State,
         call: ToolCall,
         next: ToolHandler<'_, State, Ctx>,

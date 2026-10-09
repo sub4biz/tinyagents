@@ -275,6 +275,7 @@ fn event_recorder_kinds() {
     });
     sink.emit(AgentEvent::RunCompleted {
         run_id: RunId::new("r1"),
+        outcome: None,
     });
 
     let kinds = recorder.kinds();
@@ -322,11 +323,13 @@ fn make_trajectory() -> Vec<AgentEvent> {
             output: None,
         },
         AgentEvent::ToolStarted {
+            parent_call_id: None,
             call_id: CallId::new("t1"),
             tool_name: "search".into(),
             input: None,
         },
         AgentEvent::ToolCompleted {
+            parent_call_id: None,
             call_id: CallId::new("t1"),
             tool_name: "search".into(),
             started_at_ms: None,
@@ -350,6 +353,7 @@ fn make_trajectory() -> Vec<AgentEvent> {
         },
         AgentEvent::RunCompleted {
             run_id: RunId::new("r1"),
+            outcome: None,
         },
     ]
 }
@@ -379,6 +383,7 @@ fn trajectory_tool_call_count() {
     let mut events = make_trajectory();
     // Add a second call to 'search'.
     events.push(AgentEvent::ToolStarted {
+        parent_call_id: None,
         call_id: CallId::new("t2"),
         tool_name: "search".into(),
         input: None,
@@ -441,6 +446,7 @@ fn trajectory_failed_is_true_when_run_failed_present() {
     let events = vec![AgentEvent::RunFailed {
         run_id: RunId::new("r1"),
         error: "oops".into(),
+        outcome: None,
     }];
     let traj = Trajectory::from_events(events);
     assert!(traj.failed());

@@ -26,6 +26,7 @@
 mod ledger;
 mod roster;
 mod status;
+mod status_map;
 mod steer;
 mod types;
 

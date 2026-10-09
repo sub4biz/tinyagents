@@ -93,6 +93,7 @@ pub mod store;
 pub mod stream;
 pub mod structured;
 pub mod summarization;
+pub mod terminal;
 pub mod testkit;
 pub mod title;
 pub mod token_estimation;
@@ -154,4 +155,5 @@ pub use steering::{
     RecentRequestIds, RequestIdError, SteeringCommand, SteeringCommandKind, SteeringHandle,
     SteeringOutcome, SteeringPolicy,
 };
+pub use terminal::{TerminalClass, TerminalOutcome, TerminalReason, TimeoutPhase};
 pub use tool::ToolRegistry;

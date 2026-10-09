@@ -28,6 +28,16 @@ impl ToolAllowlistMiddleware {
     pub fn allows(&self, name: &str) -> bool {
         crate::tool::toolset::tool_name_allowed(&self.allowed, name)
     }
+
+    /// The enforcement shared by `before_tool` and `check_nested_tool`.
+    fn check_allowed(&self, name: &str) -> Result<()> {
+        if !self.allows(name) {
+            return Err(TinyAgentsError::Validation(format!(
+                "tool `{name}` is not on the allowlist"
+            )));
+        }
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -42,13 +52,16 @@ impl<State: Send + Sync, Ctx: Send + Sync> Middleware<State, Ctx> for ToolAllowl
         _state: &State,
         call: &mut ToolCall,
     ) -> Result<()> {
-        if !self.allows(&call.name) {
-            return Err(TinyAgentsError::Validation(format!(
-                "tool `{}` is not on the allowlist",
-                call.name
-            )));
-        }
-        Ok(())
+        self.check_allowed(&call.name)
+    }
+
+    async fn check_nested_tool(
+        &self,
+        _ctx: &RunContext<Ctx>,
+        _state: &State,
+        call: &ToolCall,
+    ) -> Result<()> {
+        self.check_allowed(&call.name)
     }
 }
 
@@ -268,6 +281,17 @@ impl<State: Send + Sync, Ctx: Send + Sync> Middleware<State, Ctx> for ToolPolicy
         ctx: &mut RunContext<Ctx>,
         _state: &State,
         call: &mut ToolCall,
+    ) -> Result<()> {
+        self.evaluate(&call.name)
+            .and_then(|_| self.evaluate_sandbox(&call.name, ctx))
+            .map_err(TinyAgentsError::Validation)
+    }
+
+    async fn check_nested_tool(
+        &self,
+        ctx: &RunContext<Ctx>,
+        _state: &State,
+        call: &ToolCall,
     ) -> Result<()> {
         self.evaluate(&call.name)
             .and_then(|_| self.evaluate_sandbox(&call.name, ctx))
@@ -538,9 +562,17 @@ impl HumanApprovalMiddleware {
     /// tool-admission path turns into a deferral / a denial answer.
     ///
     /// A call the resume path already approved is always allowed, so the
-    /// same gate cannot defer it a second time.
-    fn decide<Ctx>(&self, ctx: &RunContext<Ctx>, call: &ToolCall) -> Result<MiddlewareControl> {
-        if !self.flagged.contains(&call.name) || ctx.is_call_approved(&call.id) {
+    /// same gate cannot defer it a second time. A `nested` call (see
+    /// [`Middleware::check_nested_tool`]) never inherits an approval granted by
+    /// id: nested ids (`<parent>/<n>`) are minted by the harness, so an
+    /// approval recorded for a model call with the same id was not for them.
+    fn decide<Ctx>(
+        &self,
+        ctx: &RunContext<Ctx>,
+        call: &ToolCall,
+        nested: bool,
+    ) -> Result<MiddlewareControl> {
+        if !self.flagged.contains(&call.name) || (!nested && ctx.is_call_approved(&call.id)) {
             return Ok(MiddlewareControl::Continue);
         }
         if let Some(outcome) = &self.outcome {
@@ -583,7 +615,7 @@ impl<State: Send + Sync, Ctx: Send + Sync> Middleware<State, Ctx> for HumanAppro
         _state: &State,
         call: &mut ToolCall,
     ) -> Result<()> {
-        match self.decide(ctx, call)? {
+        match self.decide(ctx, call, false)? {
             MiddlewareControl::Interrupt { node, message } => {
                 Err(TinyAgentsError::Interrupted { node, message })
             }
@@ -611,7 +643,28 @@ impl<State: Send + Sync, Ctx: Send + Sync> Middleware<State, Ctx> for HumanAppro
         _state: &State,
         call: &mut ToolCall,
     ) -> Result<MiddlewareControl> {
-        self.decide(ctx, call)
+        self.decide(ctx, call, false)
+    }
+
+    /// A flagged nested call is decided by the same callbacks as a model-issued
+    /// one, but an outcome that would defer or interrupt fails instead: the
+    /// parent is mid-execution and cannot pause.
+    async fn check_nested_tool(
+        &self,
+        ctx: &RunContext<Ctx>,
+        _state: &State,
+        call: &ToolCall,
+    ) -> Result<()> {
+        match self.decide(ctx, call, true) {
+            Ok(MiddlewareControl::Continue) => Ok(()),
+            Ok(_) | Err(TinyAgentsError::ApprovalRequired { .. }) => {
+                Err(TinyAgentsError::ToolFailed(format!(
+                    "nested call '{}' requires approval; nested calls cannot be deferred",
+                    call.name
+                )))
+            }
+            Err(other) => Err(other),
+        }
     }
 }
 
@@ -660,6 +713,16 @@ impl PlanModeMiddleware {
     /// [`RunMode::Plan`]: allowlisted, or classified with no side effects.
     fn allowed_in_plan_mode(&self, name: &str) -> bool {
         self.allow.contains(name) || !self.is_side_effecting(name)
+    }
+
+    /// The enforcement shared by `before_tool` and `check_nested_tool`.
+    fn check_plan_mode(&self, name: &str) -> Result<()> {
+        if self.mode.get() != RunMode::Plan || self.allowed_in_plan_mode(name) {
+            return Ok(());
+        }
+        Err(TinyAgentsError::Validation(format!(
+            "tool `{name}` is side-effecting and unavailable in plan mode"
+        )))
     }
 }
 
@@ -713,12 +776,15 @@ impl<State: Send + Sync, Ctx: Send + Sync> Middleware<State, Ctx> for PlanModeMi
         _state: &State,
         call: &mut ToolCall,
     ) -> Result<()> {
-        if self.mode.get() != RunMode::Plan || self.allowed_in_plan_mode(&call.name) {
-            return Ok(());
-        }
-        Err(TinyAgentsError::Validation(format!(
-            "tool `{}` is side-effecting and unavailable in plan mode",
-            call.name
-        )))
+        self.check_plan_mode(&call.name)
+    }
+
+    async fn check_nested_tool(
+        &self,
+        _ctx: &RunContext<Ctx>,
+        _state: &State,
+        call: &ToolCall,
+    ) -> Result<()> {
+        self.check_plan_mode(&call.name)
     }
 }

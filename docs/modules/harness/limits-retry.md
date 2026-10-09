@@ -148,3 +148,9 @@ breakdowns. This avoids hiding queueing latency inside provider latency.
 `RunContext` should carry a cancellation token. Model adapters, tools, stores,
 streams, retry sleeps, and rate-limit waits must observe it. Cancellation should
 produce a distinct error class and should not be retried.
+
+## Nested tool calls
+
+`RunLimits::max_nested_depth` (default 0: nested calls disabled, opt in with `with_max_nested_depth`) caps how deep tools may call tools through
+`ToolExecutionContext::call_tool`; nested calls also count against
+`max_tool_calls` together with model-issued calls. See [nested-tool-calls.md](nested-tool-calls.md).

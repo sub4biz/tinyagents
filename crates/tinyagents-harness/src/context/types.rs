@@ -423,6 +423,13 @@ pub struct RunContext<Ctx = ()> {
     /// loop (stop with a final response, or interrupt). Drained by the agent
     /// loop at its safe checkpoints via [`RunContext::take_control`].
     pub control: std::sync::Arc<std::sync::Mutex<Option<MiddlewareControl>>>,
+    /// Set by a middleware that just noted a repeat on a tool result (an
+    /// identical call re-issued, an identical reply) and read once by the
+    /// agent loop before its next model call. The loop's reasoning fallback
+    /// treats it as the signal that a model running without reasoning is
+    /// looping, and hands reasoning back for the next call. See
+    /// [`RunContext::note_repeat`].
+    pub repeat_noted: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Queued [`StateUpdate`]s a middleware or tool requested via
     /// [`MiddlewareControl::UpdateState`], drained by a host through
     /// [`RunContext::take_state_updates`]. See that method's docs for why the
@@ -488,6 +495,14 @@ pub struct RunContext<Ctx = ()> {
     /// Runtime-owned terminal lifecycle callback, consumed exactly once by the
     /// agent-loop guard even when the driving future is cancelled or dropped.
     pub(crate) terminal_observer: Option<TerminalObserver>,
+    /// Lifecycle cursor over the working transcript: which messages were
+    /// announced and which turn is open (see `agent_loop::lifecycle`).
+    pub(crate) turns: crate::agent_loop::TurnTracker,
+    /// Set by a no-progress / repeat guard that paused the run, holding its
+    /// root-cause summary, so the loop can report `TerminalReason::Halted`.
+    pub(crate) halted_by_guard: Option<String>,
+    /// The kind of the most recent `LimitReached` event this run emitted.
+    pub(crate) last_limit: std::sync::Mutex<Option<crate::events::LimitKind>>,
     /// The [`CallId`] the agent loop minted for the model call currently in
     /// flight through the model-wrap middleware onion, mirroring
     /// [`crate::events::HarnessRunStatus::active_model_call`].
@@ -501,6 +516,14 @@ pub struct RunContext<Ctx = ()> {
     /// `None` outside that window, and always `None` for a caller that never
     /// goes through the agent loop.
     pub active_model_call: Option<CallId>,
+    pub(crate) provider_started: bool,
+    /// Whether the *current* model call reached the provider; reset when a
+    /// call begins (see `begin_model_call`).
+    pub(crate) call_provider_started: bool,
+    /// Set when a model call returned an error, so the terminal classifier
+    /// still knows the failure surfaced inside the provider call after
+    /// `active_model_call` was cleared.
+    pub(crate) model_call_failed: bool,
     /// Whether the model call most recently dispatched by the agent loop used
     /// the streaming path. Set by the loop's innermost model call before the
     /// wrap middleware sees the result, so a middleware can tell that
@@ -559,6 +582,10 @@ pub struct RunContext<Ctx = ()> {
     /// [`crate::tool::LedgerFailure`] for the two modes; defaults to
     /// [`crate::tool::LedgerFailure::Abort`].
     pub tool_effect_ledger_failure: crate::tool::LedgerFailure,
+    /// Run-wide gate for nested tool calls across every concurrent parent:
+    /// concurrency-safe calls hold it shared, calls to tools (or wrap
+    /// middleware) that are not concurrency-safe hold it exclusively. A call already running under the gate does not retake it.
+    pub(crate) nested_serial: std::sync::Arc<tokio::sync::RwLock<()>>,
     /// Durable sink for [`crate::summarization::CompactionRecord`]s this run
     /// produces, when a host wants every compaction persisted somewhere
     /// durable rather than only kept in

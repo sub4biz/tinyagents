@@ -3580,3 +3580,48 @@ fn take_one(counter: &AtomicUsize) -> bool {
     }
     false
 }
+
+#[tokio::test]
+async fn hosted_error_run_terminal_outcome_message_is_sanitized() {
+    struct LeakyModel;
+    #[async_trait]
+    impl tinyinference_llm::model::ChatModel<()> for LeakyModel {
+        async fn invoke(
+            &self,
+            _: &(),
+            _: tinyinference_llm::model::ModelRequest,
+        ) -> tinyinference_llm::Result<tinyinference_llm::model::ModelResponse> {
+            Err(tinyinference_llm::Error::Model(
+                "secret-provider-detail".into(),
+            ))
+        }
+    }
+    let host = crate::host::HostCapabilities::new(
+        Arc::new(StaticContextComposer::empty()),
+        Arc::new(InMemoryDefinitionRegistry::new(vec![AgentDefinition::new(
+            "helper",
+            "Helper",
+            "test helper",
+        )])),
+        Arc::new(AllowAllSecurityGate),
+        Arc::new(FixedModelResolver::new(Arc::new(LeakyModel))),
+    );
+    let harness: AgentHarness<()> = AgentHarness::new();
+    let error = harness
+        .invoke_agent(
+            AgentInvocation::new(
+                host,
+                AgentTurnRequest::new(
+                    "helper",
+                    vec![tinyinference_llm::message::Message::user("hi")],
+                ),
+                RunContext::new(RunConfig::new("leaky"), ()),
+            ),
+            &(),
+        )
+        .await
+        .expect_err("the provider fails");
+    let run = error.run.expect("partial run");
+    let outcome = run.terminal.expect("typed outcome");
+    assert!(!outcome.message.contains("secret"), "{}", outcome.message);
+}

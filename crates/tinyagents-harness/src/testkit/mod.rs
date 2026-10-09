@@ -668,6 +668,7 @@ impl Trajectory {
     ///         call_id: CallId::new("c1"),
     ///         tool_name: "search".into(),
     ///         input: None,
+    ///         parent_call_id: None,
     ///     },
     /// ];
     /// Trajectory::from_events(events).assert_tool_called("search");

@@ -225,3 +225,89 @@ fn search_tools_contribute_no_files() {
     ])]);
     assert!(ops.is_empty());
 }
+
+#[test]
+fn a_path_that_looks_like_the_omitted_marker_stays_a_path() {
+    let mut ops = FileOperations::default();
+    ops.add_read("…and 5 more");
+    let (body, parsed) = split_file_sections(&append_file_sections("s", &ops));
+    assert_eq!(body, "s");
+    assert_eq!(parsed.read_only().len(), 1);
+    assert_eq!(parsed.read_omitted, 0);
+}
+
+#[test]
+fn distinct_paths_never_share_an_identity() {
+    let mut ops = FileOperations::default();
+    for path in ["a\nb", "a?b", "<x", "&lt;x"] {
+        ops.add_read(path);
+    }
+    assert_eq!(ops.read_only().len(), 4);
+}
+
+#[test]
+fn text_without_a_trailer_comes_back_unchanged() {
+    let text = "summary\n\n";
+    let (body, ops) = split_file_sections(text);
+    assert_eq!(body, text);
+    assert!(ops.is_empty());
+}
+
+#[test]
+fn section_delimiters_in_prose_are_not_parsed() {
+    let text = "intro <read-files>\nnotes\n</read-files> outro";
+    let (body, ops) = split_file_sections(text);
+    assert_eq!(body, text);
+    assert!(ops.is_empty());
+}
+
+#[test]
+fn huge_omitted_counts_saturate() {
+    let max = usize::MAX;
+    let text = format!("s\n\n<read-files>\n…and {max} more\n…and {max} more\n</read-files>");
+    let (_, ops) = split_file_sections(&text);
+    assert_eq!(ops.read_omitted, usize::MAX);
+    let mut merged = ops.clone();
+    merged.merge(&ops);
+    assert_eq!(merged.read_omitted, usize::MAX);
+}
+
+#[test]
+fn escaped_paths_survive_repeated_compactions_unchanged() {
+    let mut ops = FileOperations::default();
+    ops.add_modified("a<b&c");
+    let first = append_file_sections("s", &ops);
+    let (body, parsed) = split_file_sections(&first);
+    assert_eq!(
+        parsed.modified(),
+        ops.modified(),
+        "parsing keeps the encoding"
+    );
+    let second = append_file_sections(&body, &parsed);
+    assert_eq!(first, second, "a second round trip changes nothing");
+    let mut merged = FileOperations::default();
+    merged.merge(&ops);
+    assert_eq!(merged.modified(), ops.modified(), "merging keeps it too");
+}
+
+#[test]
+fn a_later_touch_of_a_carried_path_moves_it_instead_of_duplicating() {
+    let mut carried = FileOperations::default();
+    carried.add_read("src/a<b.rs");
+    let (_, mut ops) = split_file_sections(&append_file_sections("s", &carried));
+    ops.add_modified("src/a<b.rs");
+    assert_eq!(ops.modified().len(), 1);
+    assert!(ops.read_only().is_empty(), "the read became a modification");
+}
+
+#[test]
+fn trailing_whitespace_after_a_trailer_is_tolerated() {
+    let mut ops = FileOperations::default();
+    ops.add_read("a.rs");
+    ops.add_modified("b.rs");
+    let text = format!("{}\n \n", append_file_sections("s", &ops));
+    let (body, parsed) = split_file_sections(&text);
+    assert_eq!(body, "s");
+    assert_eq!(parsed.read_only(), vec!["a.rs"]);
+    assert_eq!(parsed.modified(), vec!["b.rs"]);
+}

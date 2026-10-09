@@ -116,7 +116,9 @@ impl PromptCacheTracker {
             .filter(|prev| prev.model == model)
             .cloned();
         let miss = previous.as_ref().and_then(|prev| {
-            if !cache_activity && !prev.reported_cache {
+            // Only a baseline that reported cache activity can be missed: a
+            // first creation-only call establishes it, it does not break it.
+            if !prev.reported_cache {
                 return None;
             }
             let expected = prev.prompt_tokens.min(prompt_tokens);

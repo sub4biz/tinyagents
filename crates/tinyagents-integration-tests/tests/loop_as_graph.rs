@@ -66,9 +66,15 @@ fn harness_for(execution: LoopExecution, model: Arc<MockModel>) -> AgentHarness<
 /// Asserts `expected` appears, in order, as a (not necessarily contiguous)
 /// subsequence of `actual` — the "same kind sequence, extra graph events
 /// allowed" contract.
+///
+/// The turn/message lifecycle events (`turn.*`, `message.appended`) are emitted
+/// by the direct loop only for now; the graph driver does not announce them, so
+/// they are excluded from the expected sequence.
 fn assert_kinds_subsequence(expected: &[String], actual: &[String]) {
     let mut cursor = 0;
-    for kind in expected {
+    let lifecycle =
+        |kind: &&String| !(kind.starts_with("turn.") || kind.as_str() == "message.appended");
+    for kind in expected.iter().filter(lifecycle) {
         let Some(offset) = actual[cursor..].iter().position(|k| k == kind) else {
             panic!(
                 "expected event kind `{kind}` not found (in order) in graph run's kinds: \
@@ -628,4 +634,263 @@ async fn graph_reresolves_when_before_model_adds_a_model_hint() {
         .expect("run completes");
 
     assert_eq!(run.text(), Some("hinted".to_string()));
+}
+
+// ── Terminal outcome parity ─────────────────────────────────────────────────
+
+/// A `StopWithPartial` cap must be reported identically by both engines: a
+/// limit outcome, not a plain completion.
+#[tokio::test]
+async fn model_cap_stop_reports_the_same_terminal_outcome_in_both_engines() {
+    use tinyagents_harness::events::LimitKind;
+    use tinyagents_harness::limits::{LimitBehavior, RunLimits};
+    use tinyagents_harness::terminal::TerminalReason;
+
+    for execution in [LoopExecution::Direct, LoopExecution::Graph] {
+        let model = Arc::new(MockModel::with_tool_call("spin", serde_json::json!({})));
+        let mut harness = harness_for(execution, model);
+        harness.register_tool(Arc::new(tinyagents_harness::testkit::FakeTool::returning(
+            "spin", "again",
+        )));
+        harness.with_policy(RunPolicy {
+            execution,
+            limits: RunLimits::default()
+                .with_max_model_calls(2)
+                .with_behavior(LimitBehavior::StopWithPartial),
+            ..RunPolicy::default()
+        });
+        let run = harness
+            .invoke_default(&(), vec![Message::user("go")])
+            .await
+            .expect("StopWithPartial completes the run");
+        let outcome = run.terminal.expect("terminal outcome");
+        assert_eq!(
+            outcome.reason,
+            TerminalReason::LimitReached(Some(LimitKind::ModelCalls)),
+            "{execution:?}"
+        );
+    }
+}
+
+/// The graph engine honors `StopWithPartial` for the tool-call cap (the direct
+/// loop surfaces it as a `LimitExceeded` error carrying `ToolCalls`); the stop
+/// must carry `ToolCalls`, not an untyped limit.
+#[tokio::test]
+async fn graph_tool_cap_stop_reports_a_typed_tool_calls_limit() {
+    use tinyagents_harness::events::LimitKind;
+    use tinyagents_harness::limits::{LimitBehavior, RunLimits};
+    use tinyagents_harness::terminal::TerminalReason;
+
+    for execution in [LoopExecution::Graph] {
+        let model = Arc::new(MockModel::with_tool_call("spin", serde_json::json!({})));
+        let mut harness = harness_for(execution, model);
+        harness.register_tool(Arc::new(tinyagents_harness::testkit::FakeTool::returning(
+            "spin", "again",
+        )));
+        harness.with_policy(RunPolicy {
+            execution,
+            limits: RunLimits::default()
+                .with_max_tool_calls(1)
+                .with_behavior(LimitBehavior::StopWithPartial),
+            ..RunPolicy::default()
+        });
+        let run = harness
+            .invoke_default(&(), vec![Message::user("go")])
+            .await
+            .expect("StopWithPartial completes the run");
+        let outcome = run.terminal.expect("terminal outcome");
+        assert_eq!(
+            outcome.reason,
+            TerminalReason::LimitReached(Some(LimitKind::ToolCalls)),
+            "{execution:?}"
+        );
+        assert!(
+            outcome.message.contains("tool_calls"),
+            "{execution:?}: {outcome:?}"
+        );
+    }
+}
+
+struct BoomModel;
+
+#[async_trait::async_trait]
+impl tinyinference_llm::model::ChatModel<()> for BoomModel {
+    async fn invoke(
+        &self,
+        _: &(),
+        _: tinyinference_llm::model::ModelRequest,
+    ) -> tinyinference_llm::Result<ModelResponse> {
+        Err(tinyinference_llm::Error::Model("model boom".into()))
+    }
+}
+
+struct FailingAfterAgent;
+
+#[async_trait::async_trait]
+impl tinyagents_harness::middleware::Middleware<(), ()> for FailingAfterAgent {
+    fn name(&self) -> &str {
+        "failing_after_agent"
+    }
+
+    async fn after_agent(
+        &self,
+        _ctx: &mut RunContext<()>,
+        _state: &(),
+        _run: &mut tinyagents_harness::middleware::AgentRun,
+    ) -> tinyagents_harness::Result<()> {
+        Err(TinyAgentsError::Middleware("cleanup boom".into()))
+    }
+}
+
+/// When the run already failed, a failing `after_agent` hook must not replace
+/// the originating error, in either engine.
+#[tokio::test]
+async fn a_failing_after_agent_keeps_the_original_error_in_both_engines() {
+    for execution in [LoopExecution::Direct, LoopExecution::Graph] {
+        let mut harness: AgentHarness<()> = AgentHarness::new();
+        harness
+            .register_model("mock", Arc::new(BoomModel))
+            .set_default_model("mock");
+        if matches!(execution, LoopExecution::Graph) {
+            harness.with_loop_driver(Arc::new(GraphLoopDriver::new()));
+        }
+        harness.with_policy(RunPolicy {
+            execution,
+            ..RunPolicy::default()
+        });
+        harness.push_middleware(Arc::new(FailingAfterAgent));
+        let error = harness
+            .invoke_default(&(), vec![Message::user("go")])
+            .await
+            .expect_err("the run fails");
+        assert!(
+            error.to_string().contains("model boom"),
+            "{execution:?}: {error}"
+        );
+    }
+}
+
+/// A failing `after_agent` hook on an otherwise successful run is the surfaced
+/// error, so the partial run's terminal outcome must be that failure rather
+/// than the stale completion recorded before the hook ran.
+#[tokio::test]
+async fn a_failing_after_agent_on_a_successful_run_records_a_failure_outcome() {
+    use tinyagents_harness::terminal::{TerminalClass, TerminalReason};
+
+    for execution in [LoopExecution::Direct, LoopExecution::Graph] {
+        let model = Arc::new(MockModel::with_responses(vec![ModelResponse::assistant(
+            "fine",
+        )]));
+        let mut harness = harness_for(execution, model);
+        harness.push_middleware(Arc::new(FailingAfterAgent));
+        let ctx = RunContext::new(tinyagents_harness::context::RunConfig::new("aa"), ());
+        let partial = harness
+            .invoke_in_context_collecting_partial(&(), ctx, vec![Message::user("go")])
+            .await;
+        let error = partial.error.expect("the hook error surfaces");
+        assert!(error.to_string().contains("cleanup boom"), "{execution:?}");
+        let outcome = partial.run.terminal.expect("terminal outcome");
+        assert_ne!(outcome.reason, TerminalReason::Completed, "{execution:?}");
+        assert_eq!(outcome.class, TerminalClass::Failure, "{execution:?}");
+    }
+}
+
+/// Under `LimitBehavior::Error` the graph engine's tool-cap failure still
+/// carries the concrete `ToolCalls` kind on the partial run's outcome.
+#[tokio::test]
+async fn graph_tool_cap_error_carries_the_tool_calls_kind() {
+    use tinyagents_harness::events::LimitKind;
+    use tinyagents_harness::limits::RunLimits;
+    use tinyagents_harness::terminal::TerminalReason;
+
+    let model = Arc::new(MockModel::with_tool_call("spin", serde_json::json!({})));
+    let mut harness = harness_for(LoopExecution::Graph, model);
+    harness.register_tool(Arc::new(tinyagents_harness::testkit::FakeTool::returning(
+        "spin", "again",
+    )));
+    harness.with_policy(RunPolicy {
+        execution: LoopExecution::Graph,
+        limits: RunLimits::default().with_max_tool_calls(1),
+        ..RunPolicy::default()
+    });
+    let ctx = RunContext::new(tinyagents_harness::context::RunConfig::new("cap"), ());
+    let partial = harness
+        .invoke_in_context_collecting_partial(&(), ctx, vec![Message::user("go")])
+        .await;
+    assert!(partial.error.is_some());
+    assert_eq!(
+        partial.run.terminal.expect("outcome").reason,
+        TerminalReason::LimitReached(Some(LimitKind::ToolCalls))
+    );
+}
+
+struct LimitFromHook;
+
+#[async_trait::async_trait]
+impl tinyagents_harness::middleware::Middleware<(), ()> for LimitFromHook {
+    fn name(&self) -> &str {
+        "limit_from_hook"
+    }
+
+    async fn before_tool(
+        &self,
+        _ctx: &mut RunContext<()>,
+        _state: &(),
+        _call: &mut tinyinference_llm::tool::ToolCall,
+    ) -> tinyagents_harness::Result<()> {
+        Err(TinyAgentsError::LimitExceeded("policy budget".into()))
+    }
+}
+
+/// A `LimitExceeded` raised by middleware is not the tool-call cap, so under
+/// `StopWithPartial` it must fail the run in both engines instead of becoming
+/// a partial stop labeled `ToolCalls`.
+#[tokio::test]
+async fn a_middleware_limit_error_is_not_a_tool_cap_partial_stop() {
+    use tinyagents_harness::limits::{LimitBehavior, RunLimits};
+
+    for execution in [LoopExecution::Direct, LoopExecution::Graph] {
+        let model = Arc::new(MockModel::with_tool_call("spin", serde_json::json!({})));
+        let mut harness = harness_for(execution, model);
+        harness.register_tool(Arc::new(tinyagents_harness::testkit::FakeTool::returning(
+            "spin", "again",
+        )));
+        harness.push_middleware(Arc::new(LimitFromHook));
+        harness.with_policy(RunPolicy {
+            execution,
+            limits: RunLimits::default().with_behavior(LimitBehavior::StopWithPartial),
+            ..RunPolicy::default()
+        });
+        let result = harness.invoke_default(&(), vec![Message::user("go")]).await;
+        assert!(
+            matches!(result, Err(TinyAgentsError::LimitExceeded(_))),
+            "{execution:?}: {result:?}"
+        );
+    }
+}
+
+/// The turn/message lifecycle events are direct-loop only for now (a documented
+/// follow-up). Pin that so the gap is explicit and this parity file's filter
+/// cannot silently hide a change in either direction.
+#[tokio::test]
+async fn lifecycle_events_are_direct_loop_only_until_the_graph_driver_emits_them() {
+    for (execution, expect_lifecycle) in
+        [(LoopExecution::Direct, true), (LoopExecution::Graph, false)]
+    {
+        let model = Arc::new(MockModel::with_responses(vec![ModelResponse::assistant(
+            "done",
+        )]));
+        let harness = harness_for(execution, model);
+        let recorder = EventRecorder::new();
+        let ctx = RunContext::new(RunConfig::new("lc"), ()).with_events(recorder.sink());
+        harness
+            .invoke_in_context(&(), ctx, vec![Message::user("hi")])
+            .await
+            .unwrap();
+        let has_lifecycle = recorder
+            .events()
+            .iter()
+            .any(|event| event.kind() == "turn.started" || event.kind() == "message.appended");
+        assert_eq!(has_lifecycle, expect_lifecycle, "{execution:?}");
+    }
 }

@@ -222,7 +222,8 @@ pub(crate) struct RateLimiterState {
 }
 
 /// Why a model call failed, as far as failover policy is concerned.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum FailoverReason {
     /// Credentials were rejected (`401`/`403`, invalid key). May be fixed by a
     /// credential refresh, so it is not remembered across calls.

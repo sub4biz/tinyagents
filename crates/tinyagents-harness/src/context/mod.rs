@@ -313,6 +313,7 @@ impl<Ctx> RunContext<Ctx> {
             run_queue: None,
             cancellation: CancellationToken::new(),
             control: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            repeat_noted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             state_updates: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             tool_state_updates: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             terminate_votes: Vec::new(),
@@ -324,7 +325,13 @@ impl<Ctx> RunContext<Ctx> {
             host_agent_id: None,
             host_authority: None,
             terminal_observer: None,
+            turns: crate::agent_loop::TurnTracker::default(),
+            halted_by_guard: None,
+            last_limit: std::sync::Mutex::new(None),
             active_model_call: None,
+            provider_started: false,
+            call_provider_started: false,
+            model_call_failed: false,
             call_streamed: false,
             prefix_epoch: 0,
             discarded_usage: Vec::new(),
@@ -334,6 +341,7 @@ impl<Ctx> RunContext<Ctx> {
             child_ordinal: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
             tool_effect_ledger: None,
             tool_effect_ledger_failure: crate::tool::LedgerFailure::default(),
+            nested_serial: std::sync::Arc::default(),
             compaction_sink: None,
         }
     }
@@ -612,6 +620,35 @@ impl<Ctx> RunContext<Ctx> {
         self.control.lock().ok().and_then(|mut guard| guard.take())
     }
 
+    /// Records that a middleware just noted a repeat on a tool result (an
+    /// identical call re-issued, an identical reply). The agent loop reads it
+    /// once before its next model call ([`Self::take_repeat_noted`]); a
+    /// model running without reasoning that repeats itself is handed
+    /// reasoning back.
+    pub fn note_repeat(&self) {
+        self.repeat_noted
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Asks for reasoning on the next model call while the loop's reasoning
+    /// fallback has switched it off. Same flag as [`Self::note_repeat`]: a
+    /// middleware about to issue a call where thinking is worth a dead call's
+    /// bounded cost (the finish check, which has to ask what the request
+    /// implied) uses this. With the fallback disabled reasoning is never off,
+    /// so the request is a no-op by construction; it never raises the effort
+    /// above what the request already asks for.
+    pub fn request_reasoning(&self) {
+        self.repeat_noted
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Whether a repeat was noted (or reasoning requested) since the last
+    /// take; clears it.
+    pub fn take_repeat_noted(&self) -> bool {
+        self.repeat_noted
+            .swap(false, std::sync::atomic::Ordering::Relaxed)
+    }
+
     /// Queues a [`StateUpdate`] for the host to apply.
     ///
     /// The agent loop only ever holds `state: &State` (a shared reference), so
@@ -800,7 +837,83 @@ impl<Ctx> RunContext<Ctx> {
 
     /// Emits `event` on this run's event sink, returning the recorded entry.
     pub fn emit(&self, event: AgentEvent) -> EventRecord {
+        // Remember which cap tripped last, so a `LimitExceeded` failure can be
+        // classified with its kind (the error itself carries only text).
+        if let AgentEvent::LimitReached { kind } = &event {
+            *self
+                .last_limit
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(*kind);
+        }
         self.events.emit(event)
+    }
+
+    /// Forgets the cached limit kind. The loop calls this at each turn's limit
+    /// checks so a kind emitted earlier cannot be attributed to a later,
+    /// unrelated `LimitExceeded` that emitted no event of its own.
+    pub(crate) fn clear_last_limit(&self) {
+        self.last_limit
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+    }
+
+    /// The most recent `LimitReached` kind, without consuming it.
+    pub fn peek_last_limit(&self) -> Option<crate::events::LimitKind> {
+        *self
+            .last_limit
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    pub(crate) fn take_last_limit(&self) -> Option<crate::events::LimitKind> {
+        self.last_limit
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+    }
+
+    /// Records that a provider call was dispatched. Called by the model base
+    /// call of each loop driver immediately before it reaches the provider.
+    pub fn mark_provider_started(&mut self) {
+        self.provider_started = true;
+        self.call_provider_started = true;
+    }
+
+    #[doc(hidden)]
+    pub fn mark_model_call_failed(&mut self) {
+        self.model_call_failed = true;
+    }
+
+    /// Whether a model call surfaced an error (see `model_call_failed`).
+    pub fn model_call_failed(&self) -> bool {
+        self.model_call_failed
+    }
+
+    /// Marks the start of a model call: clears the per-call provider flag.
+    pub fn begin_model_call(&mut self) {
+        self.call_provider_started = false;
+        self.model_call_failed = false;
+    }
+
+    /// Whether the current (or most recent) model call reached the provider.
+    pub fn call_provider_started(&self) -> bool {
+        self.call_provider_started
+    }
+
+    /// Whether any provider call has been dispatched during this run.
+    pub fn provider_started(&self) -> bool {
+        self.provider_started
+    }
+
+    /// Takes the repeat-progress guard's halt summary, if one was latched.
+    pub fn take_halted_by_guard(&mut self) -> Option<String> {
+        self.halted_by_guard.take()
+    }
+
+    /// Resets lifecycle tracking for a run whose input already contains seed messages.
+    pub fn reset_turn_tracker(&mut self, seed_len: usize) {
+        self.turns = crate::agent_loop::TurnTracker::new(seed_len);
     }
 
     /// Returns this run's identifier.
@@ -870,6 +983,10 @@ impl<Ctx> RunContext<Ctx> {
     ///
     /// Returns an error if the configured model-call cap is exceeded.
     pub fn record_model_call(&mut self) -> Result<()> {
+        self.last_limit
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
         self.limits.record_model_call()
     }
 
@@ -877,6 +994,10 @@ impl<Ctx> RunContext<Ctx> {
     ///
     /// Returns an error if the configured tool-call cap is exceeded.
     pub fn record_tool_call(&mut self) -> Result<()> {
+        self.last_limit
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
         self.limits.record_tool_call()
     }
 

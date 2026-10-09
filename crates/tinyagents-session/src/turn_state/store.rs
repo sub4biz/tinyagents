@@ -79,25 +79,7 @@ impl TurnStateStore {
         // Fold any pre-existing flat file for this thread into the per-turn
         // layout first so the directory is the single source of truth.
         self.migrate_thread_locked(&state.thread_id);
-        let dir = self.ensure_thread_dir(&state.thread_id)?;
-        let path = self.turn_path(&state.thread_id, &state.request_id);
-        let mut tmp = NamedTempFile::new_in(&dir)
-            .map_err(|e| format!("create turn-state tempfile in {}: {e}", dir.display()))?;
-        let bytes =
-            serde_json::to_vec_pretty(state).map_err(|e| format!("serialize turn state: {e}"))?;
-        tmp.write_all(&bytes)
-            .map_err(|e| format!("write turn-state tempfile: {e}"))?;
-        tmp.as_file()
-            .sync_all()
-            .map_err(|e| format!("fsync turn-state tempfile: {e}"))?;
-        persist_temp_file(tmp, &path)?;
-        // Sync the directory entry created by the rename — without this a crash
-        // or power loss between persist() and the next fs flush can drop the
-        // snapshot, defeating the cold-boot recovery guarantee. Best-effort on
-        // platforms where opening a directory for sync is not supported.
-        if let Err(err) = sync_dir(&dir) {
-            tracing::warn!("{LOG_PREFIX} failed to fsync {}: {err}", dir.display());
-        }
+        self.write_turn_file(state)?;
         debug!(
             "{LOG_PREFIX} wrote snapshot thread={} request={} lifecycle={:?} iter={}/{} timeline={}",
             state.thread_id,
@@ -585,6 +567,10 @@ impl TurnStateStore {
             .sync_all()
             .map_err(|e| format!("fsync turn-state tempfile: {e}"))?;
         persist_temp_file(tmp, &path)?;
+        // Sync the directory entry created by the rename — without this a crash
+        // or power loss between persist() and the next fs flush can drop the
+        // snapshot, defeating the cold-boot recovery guarantee. Best-effort on
+        // platforms where opening a directory for sync is not supported.
         if let Err(err) = sync_dir(&dir) {
             tracing::warn!("{LOG_PREFIX} failed to fsync {}: {err}", dir.display());
         }

@@ -109,17 +109,20 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
             hosted,
             "[steering] model switch rejected; keeping the current model"
         );
-        handle.reject_model_override();
+        let already_reported = handle.reject_model_override();
         ctx.emit(AgentEvent::ModelOverrideSkipped {
             requested,
             resolved,
         });
-        ctx.emit(AgentEvent::Steered {
-            command_kind: crate::steering::SteeringCommandKind::SwitchModel
-                .as_str()
-                .to_string(),
-            accepted: false,
-        });
+        // A switch already reported as applied keeps its single outcome.
+        if !already_reported {
+            ctx.emit(AgentEvent::Steered {
+                command_kind: crate::steering::SteeringCommandKind::SwitchModel
+                    .as_str()
+                    .to_string(),
+                accepted: false,
+            });
+        }
     }
 
     /// Reports a steered switch as applied (`Steered { accepted: true }`, once

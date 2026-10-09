@@ -194,10 +194,12 @@ async fn emits_started_and_completed_events() {
         kinds,
         vec![
             AgentEvent::MiddlewareStarted {
-                name: "logging".to_string()
+                name: "logging".to_string(),
+                call_id: None,
             },
             AgentEvent::MiddlewareCompleted {
-                name: "logging".to_string()
+                name: "logging".to_string(),
+                call_id: None,
             },
         ]
     );
@@ -234,10 +236,12 @@ async fn failing_hook_still_emits_balanced_completed_event() {
         brackets,
         vec![
             AgentEvent::MiddlewareStarted {
-                name: "failing".to_string()
+                name: "failing".to_string(),
+                call_id: None,
             },
             AgentEvent::MiddlewareCompleted {
-                name: "failing".to_string()
+                name: "failing".to_string(),
+                call_id: None,
             },
         ],
         "a failing hook must emit a balanced Started/Completed pair"
@@ -1782,7 +1786,7 @@ struct CountingToolBase {
 impl ToolBaseCall<(), ()> for CountingToolBase {
     fn call<'a>(
         &'a self,
-        _ctx: &'a mut RunContext,
+        _ctx: &'a RunContext,
         _state: &'a (),
         _call: ToolCall,
     ) -> BoxToolFuture<'a> {
@@ -1823,7 +1827,7 @@ impl ToolMiddleware<()> for ShortCircuitTool {
 
     async fn wrap_tool(
         &self,
-        _ctx: &mut RunContext,
+        _ctx: &RunContext,
         _state: &(),
         _call: ToolCall,
         _next: ToolHandler<'_, (), ()>,
@@ -1845,7 +1849,7 @@ impl ToolMiddleware<()> for MutateAfterTool {
 
     async fn wrap_tool(
         &self,
-        ctx: &mut RunContext,
+        ctx: &RunContext,
         state: &(),
         call: ToolCall,
         next: ToolHandler<'_, (), ()>,
@@ -1871,7 +1875,7 @@ impl ToolMiddleware<()> for RetryTool {
 
     async fn wrap_tool(
         &self,
-        ctx: &mut RunContext,
+        ctx: &RunContext,
         state: &(),
         call: ToolCall,
         next: ToolHandler<'_, (), ()>,
@@ -1899,9 +1903,9 @@ async fn wrap_tool_short_circuits_without_calling_base() {
     let mut stack: MiddlewareStack<()> = MiddlewareStack::new();
     stack.push_tool_middleware(Arc::new(ShortCircuitTool { content: "canned" }));
 
-    let mut c = ctx();
+    let c = ctx();
     let result = stack
-        .run_wrapped_tool(&mut c, &(), tool_call(), &base)
+        .run_wrapped_tool(&c, &(), tool_call(), &base)
         .await
         .unwrap()
         .into_result();
@@ -1921,9 +1925,9 @@ async fn wrap_tool_calls_next_then_mutates_result() {
     let mut stack: MiddlewareStack<()> = MiddlewareStack::new();
     stack.push_tool_middleware(Arc::new(MutateAfterTool));
 
-    let mut c = ctx();
+    let c = ctx();
     let result = stack
-        .run_wrapped_tool(&mut c, &(), tool_call(), &base)
+        .run_wrapped_tool(&c, &(), tool_call(), &base)
         .await
         .unwrap()
         .into_result();
@@ -1943,9 +1947,9 @@ async fn wrap_tool_retries_next_until_success() {
     let mut stack: MiddlewareStack<()> = MiddlewareStack::new();
     stack.push_tool_middleware(Arc::new(RetryTool { max: 5 }));
 
-    let mut c = ctx();
+    let c = ctx();
     let result = stack
-        .run_wrapped_tool(&mut c, &(), tool_call(), &base)
+        .run_wrapped_tool(&c, &(), tool_call(), &base)
         .await
         .unwrap()
         .into_result();
@@ -1953,6 +1957,40 @@ async fn wrap_tool_retries_next_until_success() {
     assert_eq!(result.output(), "eventually");
     assert_eq!(*calls.lock().unwrap(), 3);
     assert_eq!(stack.tool_middleware_len(), 1);
+}
+
+/// Wrap middleware that opts out of overlapping invocations.
+struct SerialOnlyTool;
+
+#[async_trait]
+impl ToolMiddleware<()> for SerialOnlyTool {
+    fn name(&self) -> &str {
+        "serial_only_tool"
+    }
+
+    fn concurrent_safe(&self) -> bool {
+        false
+    }
+
+    async fn wrap_tool(
+        &self,
+        ctx: &RunContext,
+        state: &(),
+        call: ToolCall,
+        next: ToolHandler<'_, (), ()>,
+    ) -> Result<MiddlewareToolOutcome> {
+        next.run(ctx, state, call).await
+    }
+}
+
+#[test]
+fn tool_middleware_concurrent_safe_is_the_conjunction_of_every_wrap() {
+    let mut stack: MiddlewareStack<()> = MiddlewareStack::new();
+    assert!(stack.tool_middleware_concurrent_safe(), "vacuously true");
+    stack.push_tool_middleware(Arc::new(MutateAfterTool));
+    assert!(stack.tool_middleware_concurrent_safe(), "default is true");
+    stack.push_tool_middleware(Arc::new(SerialOnlyTool));
+    assert!(!stack.tool_middleware_concurrent_safe());
 }
 
 #[tokio::test]

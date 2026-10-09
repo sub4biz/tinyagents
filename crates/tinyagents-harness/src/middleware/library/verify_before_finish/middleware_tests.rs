@@ -531,3 +531,101 @@ async fn skips_when_the_wrap_up_already_announced_a_budget_notice() {
         );
     }
 }
+
+/// A reasoning-only response that hits the output cap carries no text AND
+/// `finish_reason` "length". Reported as `empty_answer` it reads like the
+/// model declining to answer; it is really a call that produced nothing after
+/// spending its whole budget on reasoning, and the two need different
+/// responses from whoever reads the log.
+#[tokio::test]
+async fn a_truncated_response_with_no_output_is_not_reported_as_an_empty_answer() {
+    let mw = VerifyBeforeFinishMiddleware::new(CHECK);
+    let ctx = RunContext::new(RunConfig::new("vbf").with_max_model_calls(10), ());
+
+    let mut reasoning_only = answer("   ");
+    reasoning_only.finish_reason = Some("length".to_string());
+    assert_eq!(
+        mw.skip_reason(&ctx, &reasoning_only),
+        Some("truncated_before_any_output"),
+        "no text plus length must name the truncation, not the emptiness"
+    );
+
+    let mut partial = answer("half an ans");
+    partial.finish_reason = Some("length".to_string());
+    assert_eq!(mw.skip_reason(&ctx, &partial), Some("truncated"));
+
+    let empty = answer("   ");
+    assert_eq!(
+        mw.skip_reason(&ctx, &empty),
+        Some("empty_answer"),
+        "an answer that is merely empty keeps its own reason"
+    );
+
+    let fine = answer("a real answer");
+    assert_eq!(mw.skip_reason(&ctx, &fine), None);
+}
+
+/// A call that died at its output cap with nothing to show.
+fn dead_call() -> ModelResponse {
+    let mut response = ModelResponse::assistant(String::new()).with_finish_reason("length");
+    response.message.content = Vec::new();
+    response
+}
+
+/// The check runs with reasoning on even while the loop's reasoning
+/// fallback has switched it off after dead calls: the middleware asks for
+/// it on the call it holds the answer for.
+#[tokio::test]
+async fn the_check_asks_for_reasoning_back() {
+    use tinyinference_llm::model::{ReasoningConfig, ReasoningEffort};
+    // Three deaths hold reasoning off for four live calls; the tool round
+    // and the draft spend two of them, so the check would otherwise go out
+    // without reasoning.
+    let model = Arc::new(ScriptedModel::new(vec![
+        dead_call(),
+        dead_call(),
+        dead_call(),
+        tool_round("c1", "lookup"),
+        answer("draft"),
+        answer("checked"),
+    ]));
+    let mut harness: AgentHarness<()> = AgentHarness::new();
+    harness.register_model("mock", model.clone());
+    harness.register_tool(Arc::new(FakeTool::returning("lookup", "found")));
+    harness.push_middleware(Arc::new(VerifyBeforeFinishMiddleware::new(CHECK)));
+    harness.with_policy(RunPolicy {
+        default_reasoning: Some(ReasoningConfig::effort(ReasoningEffort::High)),
+        limits: RunLimits::default().with_max_model_calls(10),
+        ..RunPolicy::default()
+    });
+    let run = harness
+        .invoke_default(&(), vec![Message::user("do the task")])
+        .await
+        .expect("run succeeds");
+
+    assert_eq!(run.text(), Some("checked".to_string()));
+    assert_eq!(check_count(&run), 1);
+    let efforts: Vec<Option<ReasoningEffort>> = model
+        .requests()
+        .iter()
+        .map(|r| r.reasoning.as_ref().and_then(|c| c.effort))
+        .collect();
+    assert_eq!(
+        efforts,
+        vec![
+            Some(ReasoningEffort::High),
+            Some(ReasoningEffort::None),
+            Some(ReasoningEffort::None),
+            Some(ReasoningEffort::None),
+            Some(ReasoningEffort::None),
+            Some(ReasoningEffort::High),
+        ],
+        "every call after the first death runs without reasoning except the check"
+    );
+    let last = model.requests().last().expect("six requests").clone();
+    assert_eq!(
+        last.messages.last().map(Message::text),
+        Some(CHECK.to_string()),
+        "the call with reasoning is the check"
+    );
+}

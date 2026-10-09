@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use tinyagents_harness::terminal::TerminalOutcome;
 
 use crate::{
     CommitReceipt, ResumePreparation, RuntimeError, SessionStateView, SessionTerminal,
@@ -44,6 +45,14 @@ pub trait SessionHooks<C: Clone + Send + Sync + 'static = ()>: Send + Sync {
     /// Errors and cancellation observed here are deliberately observational:
     /// the result has already become durable and remains successful.
     async fn after_commit(&self, _: CommitReceipt<C>) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    /// Receives the typed [`TerminalOutcome`] of the turn, exactly once,
+    /// immediately before [`Self::on_terminal`]. A driver failure carries the
+    /// driver's own classification (timeout, provider failure, ...);
+    /// everything else is derived with [`SessionTerminal::outcome`]. The
+    /// default ignores it, so existing hooks are unaffected.
+    async fn on_terminal_outcome(&self, _: TerminalOutcome) -> Result<(), RuntimeError> {
         Ok(())
     }
     /// Runs exactly once for every terminal turn result.

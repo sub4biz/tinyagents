@@ -233,6 +233,7 @@ fn populates_generation_and_tool_io_when_captured() {
                 obs(
                     1,
                     AgentEvent::ToolCompleted {
+                        parent_call_id: None,
                         call_id: CallId::new("tool-call"),
                         tool_name: "lookup".to_string(),
                         started_at_ms: Some(1_704_067_199_500),
@@ -336,6 +337,7 @@ fn call_scoped_observation_ids_are_unique_per_trace() {
                     obs(
                         2,
                         AgentEvent::ToolCompleted {
+                            parent_call_id: None,
                             call_id: CallId::new("agent_turn-tool-1"),
                             tool_name: "lookup".to_string(),
                             started_at_ms: None,
@@ -386,6 +388,47 @@ fn call_scoped_observation_ids_are_unique_per_trace() {
     );
     assert_eq!(gen_a, "thread-A:turn-1:agent_turn-model-1");
     assert_eq!(span_b, "thread-B:turn-2:agent_turn-tool-1");
+}
+
+#[test]
+fn nested_tool_span_nests_under_its_parent_call_span() {
+    let client =
+        LangfuseClient::proxy("https://backend.test/telemetry/langfuse/ingestion", "t").unwrap();
+    let completed = |parent: Option<&str>, id: &str, name: &str| AgentEvent::ToolCompleted {
+        parent_call_id: parent.map(CallId::new),
+        call_id: CallId::new(id),
+        tool_name: name.to_string(),
+        started_at_ms: None,
+        input: None,
+        output: None,
+        duration_ms: None,
+        output_bytes: None,
+        error: None,
+        metadata: None,
+    };
+    let batch = client
+        .build_ingestion_batch(
+            LangfuseTraceConfig {
+                trace_id: Some("trace-1".to_string()),
+                ..Default::default()
+            },
+            &[
+                obs(1, completed(Some("p1"), "p1/1", "leaf")),
+                obs(2, completed(None, "p1", "caller")),
+            ],
+        )
+        .unwrap();
+    let events = batch["batch"].as_array().unwrap();
+    let body = |name: &str| {
+        events
+            .iter()
+            .find(|e| e["type"] == "span-create" && e["body"]["name"] == name)
+            .unwrap()["body"]
+            .clone()
+    };
+    let (leaf, caller) = (body("leaf"), body("caller"));
+    assert_eq!(leaf["parentObservationId"], caller["id"]);
+    assert_ne!(caller["parentObservationId"], caller["id"]);
 }
 
 #[test]
@@ -466,6 +509,7 @@ fn run_span_carries_run_error_and_window() {
                     AgentEvent::RunFailed {
                         run_id: RunId::new("run-1"),
                         error: "boom".to_string(),
+                        outcome: None,
                     },
                 ),
             ],

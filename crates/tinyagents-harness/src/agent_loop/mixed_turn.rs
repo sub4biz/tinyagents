@@ -84,6 +84,7 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
                 ));
             }
             run.final_response = Some(response);
+            ctx.close_turn(self.policy.capture, messages);
             if self
                 .continue_from_queue_at_finish(ctx, status, messages)
                 .await
@@ -144,6 +145,7 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
             {
                 return Ok(TurnFlow::Exit(exit));
             }
+            ctx.close_turn(self.policy.capture, messages);
             if let ControlEffect::Exit(exit) =
                 self.apply_pending_control(ctx, run, status, messages)?
             {
@@ -207,6 +209,10 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
         {
             return Ok(TurnFlow::Exit(exit));
         }
+
+        // Close the mixed turn before queued messages are drained, so they are
+        // announced after its `TurnCompleted` like on the plain tool path.
+        ctx.close_turn(self.policy.capture, messages);
 
         // Turn boundary (A4): same steer drain as the plain tool path.
         self.apply_queued_lane(ctx, status, messages, crate::run_queue::QueueLane::Steer)

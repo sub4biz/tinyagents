@@ -59,7 +59,7 @@ struct ToolBase;
 impl ToolBaseCall<(), ()> for ToolBase {
     fn call<'a>(
         &'a self,
-        _ctx: &'a mut RunContext<()>,
+        _ctx: &'a RunContext<()>,
         _state: &'a (),
         call: ToolCall,
     ) -> Pin<Box<dyn Future<Output = Result<ToolResult>> + Send + 'a>> {
@@ -78,7 +78,7 @@ impl ToolMiddleware<(), ()> for ToolShortCircuit {
 
     async fn wrap_tool(
         &self,
-        _ctx: &mut RunContext<()>,
+        _ctx: &RunContext<()>,
         _state: &(),
         call: ToolCall,
         _next: ToolHandler<'_, (), ()>,
@@ -233,7 +233,7 @@ async fn middleware_stack_runs_lifecycle_hooks_and_builtin_guards() {
     assert!(tracing.records().iter().any(|r| r.phase == "agent"));
     assert!(recorder.events().iter().any(|r| matches!(
         r.event,
-        AgentEvent::MiddlewareStarted { ref name } if name == "log"
+        AgentEvent::MiddlewareStarted { ref name, .. } if name == "log"
     )));
 }
 
@@ -332,7 +332,7 @@ async fn builtin_middleware_validates_structured_output_human_approval_and_wraps
     assert_eq!(tool_stack.tool_middleware_len(), 1);
     let tool_result = tool_stack
         .run_wrapped_tool(
-            &mut ctx,
+            &ctx,
             &(),
             ToolCall::new("tool-1", "lookup", json!({})),
             &ToolBase,

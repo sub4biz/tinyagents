@@ -121,3 +121,17 @@ fn a_model_switch_starts_a_fresh_baseline() {
     // And the new model's own baseline is then tracked.
     assert!(t.observe("t", "model-b", &usage(12_000, 0)).is_some());
 }
+
+#[test]
+fn a_first_creation_only_call_is_a_baseline_not_a_miss() {
+    let mut t = tracker();
+    t.observe("t", "m", &usage(10_000, 0));
+    let creation = Usage {
+        input_tokens: 12_000,
+        cache_creation_tokens: 10_000,
+        ..Usage::default()
+    };
+    assert_eq!(t.observe("t", "m", &creation), None);
+    // The baseline is now established: a later total drop is a miss.
+    assert!(t.observe("t", "m", &usage(13_000, 0)).is_some());
+}

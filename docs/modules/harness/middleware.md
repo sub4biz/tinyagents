@@ -82,9 +82,11 @@ pub trait ModelMiddleware<State, Ctx = ()>: Send + Sync {
 #[async_trait]
 pub trait ToolMiddleware<State, Ctx = ()>: Send + Sync {
     fn name(&self) -> &str;
+    /// Defaults to `true`; `false` keeps multi-call batches serial.
+    fn concurrent_safe(&self) -> bool { true }
     async fn wrap_tool(
         &self,
-        ctx: &mut RunContext<Ctx>,
+        ctx: &RunContext<Ctx>, // shared: calls of one batch overlap
         state: &State,
         call: ToolCall,
         next: ToolHandler<'_, State, Ctx>,
@@ -103,7 +105,10 @@ innermost layer is supplied by the agent loop via the `ModelBaseCall` /
 outermost first). `MiddlewareModelOutcome::Response(ModelResponse)` and
 `MiddlewareToolOutcome::Result(ToolResult)` carry the resolved value; both are
 `#[non_exhaustive]`. The agent loop runs each lifecycle `before_*` hook, then
-the wrap onion, then each lifecycle `after_*` hook.
+the wrap onion, then each lifecycle `after_*` hook. `wrap_tool` and
+`ToolHandler::run` take a shared `&RunContext`; see
+[tool-wrap concurrency](middleware-tool-wrap.md) for what that means for
+multi-call batches and how to migrate a `&mut RunContext` wrap.
 
 ## Ordering
 

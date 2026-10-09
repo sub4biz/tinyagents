@@ -149,11 +149,13 @@ async fn uncommitted_refresh_errors_preserve_prefix_history_and_accept_old_froze
         ];
         let result = if failure == "driver" {
             Err(DriverFailure {
+                outcome: None,
                 error: RuntimeError::Driver("failed".into()),
                 partial: None,
             })
         } else if failure.starts_with("partial") {
             Err(DriverFailure {
+                outcome: None,
                 error: RuntimeError::Driver("partial".into()),
                 partial: Some(outcome(refreshed)),
             })
@@ -298,6 +300,7 @@ async fn successfully_persisted_partial_refresh_keeps_new_prefix() {
     let driver = Arc::new(Driver::new(vec![
         Ok(outcome(old())),
         Err(DriverFailure {
+            outcome: None,
             error: RuntimeError::Driver("partial".into()),
             partial: Some(outcome(partial_history.clone())),
         }),
@@ -422,6 +425,7 @@ async fn prefix_extension_containing_prior_rows_forces_successor_for_normal_and_
         ];
         let result = if partial {
             Err(DriverFailure {
+                outcome: None,
                 error: RuntimeError::Driver("partial".into()),
                 partial: Some(outcome(expected.clone())),
             })

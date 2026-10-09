@@ -112,7 +112,7 @@ impl<C: Send + Sync> ToolMiddleware<(), C> for CredentialScrubMiddleware {
 
     async fn wrap_tool(
         &self,
-        ctx: &mut RunContext<C>,
+        ctx: &RunContext<C>,
         state: &(),
         call: TaToolCall,
         next: ToolHandler<'_, (), C>,

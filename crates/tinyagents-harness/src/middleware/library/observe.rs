@@ -330,6 +330,11 @@ impl TracingMiddleware {
         self.counts.lock().expect("counts mutex poisoned").clone()
     }
 
+    /// Applies `update` to the hook counters under their lock.
+    fn bump(&self, update: impl FnOnce(&mut TraceCounts)) {
+        update(&mut self.counts.lock().expect("counts mutex poisoned"));
+    }
+
     fn push(&self, phase: &'static str, boundary: TraceBoundary) {
         let mut records = self.records.lock().expect("records mutex poisoned");
         if self.max_records == 0 {
@@ -355,7 +360,7 @@ impl<State: Send + Sync, Ctx: Send + Sync> Middleware<State, Ctx> for TracingMid
     }
 
     async fn before_agent(&self, _ctx: &mut RunContext<Ctx>, _state: &State) -> Result<()> {
-        self.counts.lock().expect("counts mutex poisoned").agent += 1;
+        self.bump(|counts| counts.agent += 1);
         self.push("agent", TraceBoundary::Begin);
         Ok(())
     }
@@ -376,7 +381,7 @@ impl<State: Send + Sync, Ctx: Send + Sync> Middleware<State, Ctx> for TracingMid
         _state: &State,
         _request: &mut ModelRequest,
     ) -> Result<()> {
-        self.counts.lock().expect("counts mutex poisoned").model += 1;
+        self.bump(|counts| counts.model += 1);
         self.push("model", TraceBoundary::Begin);
         Ok(())
     }
@@ -387,7 +392,7 @@ impl<State: Send + Sync, Ctx: Send + Sync> Middleware<State, Ctx> for TracingMid
         _state: &State,
         _delta: &mut ModelDelta,
     ) -> Result<()> {
-        self.counts.lock().expect("counts mutex poisoned").delta += 1;
+        self.bump(|counts| counts.delta += 1);
         Ok(())
     }
 
@@ -407,7 +412,7 @@ impl<State: Send + Sync, Ctx: Send + Sync> Middleware<State, Ctx> for TracingMid
         _state: &State,
         _call: &mut ToolCall,
     ) -> Result<()> {
-        self.counts.lock().expect("counts mutex poisoned").tool += 1;
+        self.bump(|counts| counts.tool += 1);
         self.push("tool", TraceBoundary::Begin);
         Ok(())
     }
@@ -418,7 +423,7 @@ impl<State: Send + Sync, Ctx: Send + Sync> Middleware<State, Ctx> for TracingMid
         _state: &State,
         _delta: &mut ToolDelta,
     ) -> Result<()> {
-        self.counts.lock().expect("counts mutex poisoned").delta += 1;
+        self.bump(|counts| counts.delta += 1);
         Ok(())
     }
 
@@ -434,7 +439,7 @@ impl<State: Send + Sync, Ctx: Send + Sync> Middleware<State, Ctx> for TracingMid
     }
 
     async fn on_error(&self, _ctx: &mut RunContext<Ctx>, _error: &TinyAgentsError) -> Result<()> {
-        self.counts.lock().expect("counts mutex poisoned").error += 1;
+        self.bump(|counts| counts.error += 1);
         Ok(())
     }
 }
@@ -459,6 +464,11 @@ impl LoggingMiddleware {
     pub fn counts(&self) -> HookCounts {
         self.counts.lock().expect("counts mutex poisoned").clone()
     }
+
+    /// Applies `update` to the hook counters under their lock.
+    fn bump(&self, update: impl FnOnce(&mut HookCounts)) {
+        update(&mut self.counts.lock().expect("counts mutex poisoned"));
+    }
 }
 
 impl Default for LoggingMiddleware {
@@ -474,10 +484,7 @@ impl<State: Send + Sync, Ctx: Send + Sync> Middleware<State, Ctx> for LoggingMid
     }
 
     async fn before_agent(&self, _ctx: &mut RunContext<Ctx>, _state: &State) -> Result<()> {
-        self.counts
-            .lock()
-            .expect("counts mutex poisoned")
-            .before_agent += 1;
+        self.bump(|counts| counts.before_agent += 1);
         Ok(())
     }
 
@@ -487,10 +494,7 @@ impl<State: Send + Sync, Ctx: Send + Sync> Middleware<State, Ctx> for LoggingMid
         _state: &State,
         _run: &mut AgentRun,
     ) -> Result<()> {
-        self.counts
-            .lock()
-            .expect("counts mutex poisoned")
-            .after_agent += 1;
+        self.bump(|counts| counts.after_agent += 1);
         Ok(())
     }
 
@@ -500,10 +504,7 @@ impl<State: Send + Sync, Ctx: Send + Sync> Middleware<State, Ctx> for LoggingMid
         _state: &State,
         _request: &mut ModelRequest,
     ) -> Result<()> {
-        self.counts
-            .lock()
-            .expect("counts mutex poisoned")
-            .before_model += 1;
+        self.bump(|counts| counts.before_model += 1);
         Ok(())
     }
 
@@ -513,10 +514,7 @@ impl<State: Send + Sync, Ctx: Send + Sync> Middleware<State, Ctx> for LoggingMid
         _state: &State,
         _delta: &mut ModelDelta,
     ) -> Result<()> {
-        self.counts
-            .lock()
-            .expect("counts mutex poisoned")
-            .on_model_delta += 1;
+        self.bump(|counts| counts.on_model_delta += 1);
         Ok(())
     }
 
@@ -526,10 +524,7 @@ impl<State: Send + Sync, Ctx: Send + Sync> Middleware<State, Ctx> for LoggingMid
         _state: &State,
         _response: &mut ModelResponse,
     ) -> Result<()> {
-        self.counts
-            .lock()
-            .expect("counts mutex poisoned")
-            .after_model += 1;
+        self.bump(|counts| counts.after_model += 1);
         Ok(())
     }
 
@@ -539,10 +534,7 @@ impl<State: Send + Sync, Ctx: Send + Sync> Middleware<State, Ctx> for LoggingMid
         _state: &State,
         _call: &mut ToolCall,
     ) -> Result<()> {
-        self.counts
-            .lock()
-            .expect("counts mutex poisoned")
-            .before_tool += 1;
+        self.bump(|counts| counts.before_tool += 1);
         Ok(())
     }
 
@@ -552,10 +544,7 @@ impl<State: Send + Sync, Ctx: Send + Sync> Middleware<State, Ctx> for LoggingMid
         _state: &State,
         _delta: &mut ToolDelta,
     ) -> Result<()> {
-        self.counts
-            .lock()
-            .expect("counts mutex poisoned")
-            .on_tool_delta += 1;
+        self.bump(|counts| counts.on_tool_delta += 1);
         Ok(())
     }
 
@@ -566,15 +555,12 @@ impl<State: Send + Sync, Ctx: Send + Sync> Middleware<State, Ctx> for LoggingMid
         _invocation: &ToolInvocationIdentity,
         _result: &mut ToolResult,
     ) -> Result<()> {
-        self.counts
-            .lock()
-            .expect("counts mutex poisoned")
-            .after_tool += 1;
+        self.bump(|counts| counts.after_tool += 1);
         Ok(())
     }
 
     async fn on_error(&self, _ctx: &mut RunContext<Ctx>, _error: &TinyAgentsError) -> Result<()> {
-        self.counts.lock().expect("counts mutex poisoned").on_error += 1;
+        self.bump(|counts| counts.on_error += 1);
         Ok(())
     }
 }

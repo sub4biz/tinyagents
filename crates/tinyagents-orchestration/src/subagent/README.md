@@ -164,11 +164,11 @@ orchestration depends on graph).
   (output kept), the tool path fails the job `Incomplete`. `max_cost` is **not
   enforced** here; `SubAgentBudget::to_budget_limits()` gives the harness
   `BudgetMiddleware` the same caps for in-run cost enforcement.
-- **Incomplete status.** `SubagentStatus::Incomplete(SubagentIncomplete { reason,
+- **Incomplete status.** `SubagentOutcomeKind::Incomplete(SubagentIncomplete { reason,
   kind: IncompleteKind })` and `SubAgentJobStatus::Incomplete` replace the old
   `[SUBAGENT_INCOMPLETE]` text marker. The transcript view reads
   `"status": "incomplete"` in a spawn result and still reads the legacy marker;
-  both project as `SubagentStatus::Incomplete` (previously `Failed`).
+  both project as `SubagentOutcomeKind::Incomplete` (previously `Failed`).
 - **Result policy.** `ResultPolicy { max_chars, overflow: Truncate | Artifact,
   schema }` (builders; `artifact_store` is a host `ArtifactStore` callback, the
   orchestration layer owns no store). `Truncate` keeps head and tail around
@@ -218,7 +218,7 @@ and `..Default::default()`.
   a job whose child fails with `LimitExceeded` or `Timeout` now ends
   `Incomplete` (with `incomplete_kind`) instead of `Failed`; it is still
   terminal and still returned as a tool error.
-- The transcript view's `SubagentStatus` gained `Incomplete`, and a legacy
+- The transcript view's `TranscriptSubagentStatus` gained `Incomplete`, and a legacy
   `[SUBAGENT_INCOMPLETE]` result now projects as `Incomplete` instead of
   `Failed`.
 - `tinyagents-runtime`: new `ToolSnapshot::retaining`.

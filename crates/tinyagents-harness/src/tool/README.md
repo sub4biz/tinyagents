@@ -43,6 +43,32 @@ scrub) lives in `tinytools-agent`, reached through
   the portable methods still cover only workspace/thread/output cap. A tool
   that needs a real child `RunContext` goes through the explicit dispatch
   seam instead (B1; see `docs/modules/harness/tool-context.md`).
+  `progress` is the per-call `tinytools::ProgressSink` behind
+  `ToolRunContext::report_progress`; it is `None` for a context built outside
+  a loop, where reporting is a no-op.
+
+### Nested calls (`nested.rs`)
+
+- `NestedToolRunner` — the type-erased seam behind
+  `ToolExecutionContext::call_tool`; `nested` is `None` outside the agent loop,
+  where `call_tool` returns a clear error. The loop installs the runner in a
+  task-local scoped to the executing call (`agent_loop/nested.rs`); see
+  `docs/modules/harness/nested-tool-calls.md`.
+
+### Progress (`progress/mod.rs`)
+
+- `ToolProgressGate` (crate-private) — the per-call destination for a tool's
+  `report_progress` updates. Emits `AgentEvent::ToolProgressDetail` live, queues a
+  `ToolDelta` per event for the loop to replay to `on_tool_delta`, closes when
+  the call settles so late updates are dropped, and coalesces floods. The loop
+  scopes it in a task-local around the dispatch future and
+  `ToolExecutionContext::from_run_context` picks it up for the matching call
+  id, so `ToolDispatch` implementors need no change.
+- `ToolProgressLimits` (crate-private) — events admitted per window before
+  coalescing (fixed at 32 per second). The gate closes on settle **or when the
+  scoped future is dropped**; the replay queue is bounded (64 deltas, 4 KiB
+  content each) and skipped when the run has no middleware. A `ToolDispatch`
+  must build its `ToolExecutionContext` inside `execute`'s future.
 
 ### Injected arguments (`injected.rs`)
 

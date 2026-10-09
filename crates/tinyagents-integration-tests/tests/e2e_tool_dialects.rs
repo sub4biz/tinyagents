@@ -1068,6 +1068,80 @@ async fn dropped_tool_call_nudges_are_bounded() {
 }
 
 #[tokio::test]
+async fn exhausted_model_budget_does_not_schedule_a_dropped_call_nudge() {
+    use tinyagents_harness::TinyAgentsError;
+    use tinyagents_harness::context::RunConfig;
+    use tinyagents_harness::events::LimitKind;
+    use tinyagents_harness::limits::{LimitBehavior, RunLimits};
+
+    let mut missing_call = ModelResponse::assistant("");
+    missing_call.finish_reason = Some("tool_calls".into());
+    for (response, dialect) in [
+        (missing_call, ToolDispatcher::Auto),
+        (
+            ModelResponse::assistant(UNDECODABLE_CALL),
+            ToolDispatcher::Xml,
+        ),
+    ] {
+        for behavior in [LimitBehavior::Error, LimitBehavior::StopWithPartial] {
+            let model = Arc::new(ScriptedModel::new(vec![response.clone()]));
+            let listener = Arc::new(RecordingListener::new());
+            let mut harness = harness_with(model.clone(), &listener);
+            harness.with_policy(RunPolicy {
+                limits: RunLimits {
+                    max_model_calls: 1,
+                    behavior,
+                    ..RunLimits::default()
+                },
+                tool_dialect: dialect,
+                ..RunPolicy::default()
+            });
+
+            let outcome = harness
+                .invoke_collecting_partial(
+                    &(),
+                    (),
+                    RunConfig::new("exhausted-nudge"),
+                    vec![Message::user("go")],
+                )
+                .await;
+
+            assert_eq!(model.requests().len(), 1);
+            assert_eq!(outcome.run.tool_calls, 0);
+            match behavior {
+                LimitBehavior::Error => assert!(matches!(
+                    outcome.error,
+                    Some(TinyAgentsError::LimitExceeded(_))
+                )),
+                LimitBehavior::StopWithPartial => assert!(outcome.error.is_none()),
+            }
+            let events = listener.events();
+            assert!(events.iter().any(|record| matches!(
+                record.event,
+                AgentEvent::LimitReached {
+                    kind: LimitKind::ModelCalls
+                }
+            )));
+            assert!(
+                !events
+                    .iter()
+                    .any(|record| matches!(record.event, AgentEvent::RetryScheduled { .. })),
+                "no model call remains for the scheduled retry: {events:?}; transcript: {:?}",
+                outcome.run.messages
+            );
+            let user_messages: Vec<_> = outcome
+                .run
+                .messages
+                .iter()
+                .filter(|message| matches!(message, Message::User(_)))
+                .map(Message::text)
+                .collect();
+            assert_eq!(user_messages, vec!["go"], "no unused recovery prompt");
+        }
+    }
+}
+
+#[tokio::test]
 async fn no_dropped_call_nudge_is_issued_when_the_turn_could_not_accept_a_tool_call() {
     // A provider/router can report `finish_reason == "tool_calls"` with no
     // actual call even when this turn's effective `tool_choice` is `None`

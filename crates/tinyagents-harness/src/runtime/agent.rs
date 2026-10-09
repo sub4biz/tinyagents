@@ -186,8 +186,13 @@ fn hosted_error_message(kind: HostedErrorKind) -> &'static str {
 
 /// Builds a [`HostedError`] from the raw loop error and whatever partial
 /// [`AgentRun`] the loop accumulated before failing.
-fn hosted_error(error: &TinyAgentsError, run: AgentRun) -> HostedError {
+fn hosted_error(error: &TinyAgentsError, mut run: AgentRun) -> HostedError {
     let kind = classify_hosted_error(error);
+    // The typed outcome mirrors the raw error text; keep its classification
+    // and replace the detail with the fixed, sanitized message.
+    if let Some(outcome) = run.terminal.as_mut() {
+        outcome.message = hosted_error_message(kind).to_string();
+    }
     HostedError {
         kind,
         message: hosted_error_message(kind).to_string(),
@@ -424,8 +429,13 @@ impl<State: Send + Sync + 'static, Ctx: Send + Sync> Stream for AgentStream<'_, 
 /// typed details for host-owned diagnostics and policy decisions.
 fn sanitize_hosted_stream_item(mut item: AgentStreamItem) -> AgentStreamItem {
     match &mut item {
-        AgentStreamItem::Failed { error, .. } => {
+        AgentStreamItem::Failed { error, run } => {
             *error = "hosted agent invocation failed".to_string();
+            // The partial run carries its typed outcome; keep the
+            // classification, drop the raw failure text.
+            if let Some(outcome) = run.terminal.as_mut() {
+                outcome.message = error.clone();
+            }
         }
         AgentStreamItem::Event(record) => sanitize_hosted_event(record),
         AgentStreamItem::Completed(_) => {}
@@ -462,8 +472,13 @@ fn sanitize_hosted_event(record: &mut EventRecord) {
         AgentEvent::MiddlewareFailed { error, .. } => {
             *error = "hosted middleware failed".to_string();
         }
-        AgentEvent::RunFailed { error, .. } => {
+        AgentEvent::RunFailed { error, outcome, .. } => {
             *error = "hosted agent invocation failed".to_string();
+            // The typed outcome mirrors the raw error text; keep its
+            // classification (reason, class, phase) and drop the detail.
+            if let Some(outcome) = outcome {
+                outcome.message = error.clone();
+            }
         }
         _ => {}
     }

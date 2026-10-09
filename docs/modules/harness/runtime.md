@@ -101,9 +101,9 @@ Detailed lifecycle:
 12. If tool calls exist, validate name, schema, and limits.
 13. Run `before_tool` middleware per call.
 14. Execute tools — concurrently only when *all* of: the turn has two or more
-    calls, zero tool-wrap (`ToolMiddleware`) middleware is registered (wrap
-    middleware holds `&mut RunContext` across each call, so it forces the
-    serial path), and every call's tool reports `is_concurrency_safe() ==
+    calls, every registered tool-wrap (`ToolMiddleware`) reports
+    `concurrent_safe() == true` (wraps take `&RunContext` and run inside each
+    concurrent call; `false` forces the serial path), and every call's tool reports `is_concurrency_safe() ==
     true` (the trait default is `false`, so concurrency is opt-in per tool);
     see `should_execute_tools_concurrently` in
     `crates/tinyagents-harness/src/agent_loop/tools.rs`. Lifecycle middleware
@@ -114,15 +114,12 @@ Detailed lifecycle:
     `RunLimits::max_tool_concurrency` (`futures::stream::iter(..)
     .buffered(n)`; `None`, the default, is unbounded). Results always fold
     back in original call order.
-15. `on_tool_delta` middleware exists on the `Middleware` trait and
-    `MiddlewareChain::run_on_tool_delta` is implemented, but the agent loop
-    does not call it yet — no tool progress stream is wired up today.
-16. Run `after_tool` middleware per result.
-17. Append tool messages.
-18. Repeat until no tool calls remain.
-19. Validate structured output if configured.
-20. Registered host middleware may persist short-term memory.
-21. Emit final event and return `AgentRun`.
+15. Run `after_tool` middleware per result.
+16. Append tool messages.
+17. Repeat until no tool calls remain.
+18. Validate structured output if configured.
+19. Registered host middleware may persist short-term memory.
+20. Emit final event and return `AgentRun`.
 
 Hard limits:
 
@@ -235,7 +232,9 @@ run is in flight, and the loop drains them only at safe boundaries:
 `RunPolicy::queue_mode` picks how many items a boundary takes:
 `QueueMode::All` (default) applies every pending item; `OneAtATime` applies
 the oldest and leaves the rest for the next boundary. Each application emits
-`AgentEvent::QueuedMessageApplied { lane, count }`. A "natural finish" is
+`AgentEvent::QueuedMessageApplied { lane, count, first_index, messages }` (`messages` follows the
+capture policy per message: `tool` messages under `PayloadCapture::tool_io`,
+all others under `PayloadCapture::model_io`). A "natural finish" is
 the model producing a final answer (including a structured-output finish
 under `EndStrategy::Early`/`Graceful`); a middleware `StopWithFinal` /
 `JumpTo(End)`, a limit stop, a pause, or a deferral is terminal and leaves

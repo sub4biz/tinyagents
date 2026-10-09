@@ -26,10 +26,15 @@ pub enum ToolCallStatus {
     Error,
 }
 
-/// Terminal state of a projected sub-agent run.
+/// Terminal state of a projected sub-agent run, as read back from a transcript.
+///
+/// Not to be confused with the driver's `SubagentOutcomeKind` in
+/// `tinyagents-orchestration` (the live outcome a subagent run reports); this
+/// is the display projection of what a persisted transcript recorded. See the
+/// status-vocabulary map in the orchestration crate README.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum SubagentStatus {
+pub enum TranscriptSubagentStatus {
     /// The run ended with a final answer.
     Completed,
     /// The spawning call failed.
@@ -43,6 +48,13 @@ pub enum SubagentStatus {
     /// No terminal record yet (still running, or never settled).
     Running,
 }
+
+/// Former name of [`TranscriptSubagentStatus`].
+///
+/// Renamed so it no longer collides with the orchestration driver's outcome
+/// type. The serde wire format is unchanged.
+#[deprecated(since = "2.1.4", note = "renamed to `TranscriptSubagentStatus`")]
+pub type SubagentStatus = TranscriptSubagentStatus;
 
 /// Failure payload attached to an errored [`DisplayItem::ToolCall`]. Minimal by
 /// design: the persisted transcript only records that the call failed plus an
@@ -151,7 +163,7 @@ pub enum DisplayItem {
         call_id: Option<String>,
         /// Terminal state of the run, derived from its own transcript and the
         /// spawning call's result.
-        status: SubagentStatus,
+        status: TranscriptSubagentStatus,
         #[serde(skip_serializing_if = "Option::is_none")]
         request_id: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]

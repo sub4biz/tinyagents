@@ -141,7 +141,7 @@ impl SubagentPersistence for Memory {
 fn completed(task_id: &str, output: &str) -> SubagentOutcome {
     SubagentOutcome {
         output: output.into(),
-        status: SubagentStatus::Completed,
+        status: SubagentOutcomeKind::Completed,
         ..SubagentOutcome::cancelled(task_id)
     }
 }
@@ -217,7 +217,7 @@ async fn timeout_cancels_the_child_and_ends_incomplete_without_cancelling_the_li
         .await
         .unwrap();
     match result.outcome.status {
-        SubagentStatus::Incomplete(ref inc) => assert_eq!(inc.kind, IncompleteKind::Timeout),
+        SubagentOutcomeKind::Incomplete(ref inc) => assert_eq!(inc.kind, IncompleteKind::Timeout),
         ref other => panic!("expected typed timeout, got {other:?}"),
     }
     assert!(
@@ -334,7 +334,7 @@ async fn token_budget_overshoot_ends_incomplete_with_a_typed_kind() {
         .await
         .unwrap();
     match result.outcome.status {
-        SubagentStatus::Incomplete(inc) => {
+        SubagentOutcomeKind::Incomplete(inc) => {
             assert_eq!(inc.kind, IncompleteKind::BudgetExceeded);
             assert!(inc.reason.contains("output-token"));
         }
@@ -391,7 +391,7 @@ async fn result_policy_trims_output_and_surfaces_a_schema_error() {
         .unwrap();
     assert_eq!(result.outcome.output, "0123", "hard-cut within the cap");
     assert!(result.outcome.schema_error.is_some());
-    assert_eq!(result.outcome.status, SubagentStatus::Completed);
+    assert_eq!(result.outcome.status, SubagentOutcomeKind::Completed);
 }
 
 #[tokio::test]
@@ -487,7 +487,7 @@ async fn an_over_budget_run_still_gets_the_result_policy() {
         .unwrap();
     assert!(matches!(
         result.outcome.status,
-        SubagentStatus::Incomplete(ref inc) if inc.kind == IncompleteKind::BudgetExceeded
+        SubagentOutcomeKind::Incomplete(ref inc) if inc.kind == IncompleteKind::BudgetExceeded
     ));
     assert!(result.outcome.output.chars().count() <= 80);
 }

@@ -26,8 +26,12 @@ impl ContextCompressionMiddleware {
         request: &ModelRequest,
         overflow: OverflowInfo,
         strictly_smaller: bool,
+        truncate: Option<usize>,
     ) -> Option<ModelRequest> {
-        let before_tokens = total_message_tokens(&request.messages);
+        // Sizes are compared as sent: with a truncation cap in force the
+        // provider sees the cut request, so a summary replacing an already-cut
+        // result must beat that, not the raw base.
+        let before_tokens = sent_tokens(&request.messages, truncate);
         // Checkpoints in the request (this run's fold summary, or one carried
         // in from an earlier turn) are the previous summary, never raw history
         // to summarize again.
@@ -177,7 +181,10 @@ impl ContextCompressionMiddleware {
                 };
                 let new_messages = splice_summary(to_keep, record.summary.clone());
                 let to_tokens = total_message_tokens(&new_messages);
-                if to_tokens > before_tokens || (strictly_smaller && to_tokens == before_tokens) {
+                let sent_to_tokens = sent_tokens(&new_messages, truncate);
+                if sent_to_tokens > before_tokens
+                    || (strictly_smaller && sent_to_tokens == before_tokens)
+                {
                     tracing::debug!(
                         before_tokens,
                         to_tokens,
@@ -231,10 +238,11 @@ impl ContextCompressionMiddleware {
 
         let new_messages = splice_summary(to_keep, record.summary.clone());
         let to_tokens = total_message_tokens(&new_messages);
+        let sent_to_tokens = sent_tokens(&new_messages, truncate);
         // A summary that grows the request (or, after the first attempt, does
         // not shrink it) cannot help, and a further attempt would only repeat
         // it: stop here, change nothing — no fold, no boundary, no record.
-        if to_tokens > before_tokens || (strictly_smaller && to_tokens == before_tokens) {
+        if sent_to_tokens > before_tokens || (strictly_smaller && sent_to_tokens == before_tokens) {
             tracing::info!(
                 before_tokens,
                 to_tokens,
@@ -265,6 +273,19 @@ impl ContextCompressionMiddleware {
         retried.messages = new_messages;
         self.forget_pending(ctx.instance_id());
         Some(retried)
+    }
+}
+
+/// Estimated tokens of `messages` as the provider would receive them: with
+/// `truncate` set, oversized tool results are cut first.
+fn sent_tokens(messages: &[Message], truncate: Option<usize>) -> u64 {
+    match truncate {
+        None => total_message_tokens(messages),
+        Some(cap) => {
+            let mut cut = messages.to_vec();
+            truncate_tool_results(&mut cut, cap);
+            total_message_tokens(&cut)
+        }
     }
 }
 
@@ -414,7 +435,7 @@ impl ContextCompressionMiddleware {
     /// announced) and idempotent.
     pub(super) fn apply_run_truncation<Ctx: Send + Sync>(
         &self,
-        ctx: &RunContext<Ctx>,
+        ctx: &mut RunContext<Ctx>,
         request: &mut ModelRequest,
     ) {
         let Some(cap) = self.tool_result_truncation else {
@@ -429,22 +450,36 @@ impl ContextCompressionMiddleware {
         if engaged {
             // The newest results answer the model's latest call; they stay
             // whole until a later assistant turn has had them.
-            truncate_older_tool_results(&mut request.messages, cap);
+            // A cut rewrites bytes the provider cached on the previous call,
+            // so the prefix epoch moves (only when something was cut) and the
+            // cache guard does not report the deliberate rewrite as a miss.
+            if truncate_older_tool_results(&mut request.messages, cap).truncated > 0 {
+                ctx.mark_prompt_prefix_changed();
+            }
+        }
+    }
+
+    /// After a `before_model` compaction on the mixed route, cuts every
+    /// oversized tool result again: the splice rebuilt the request from the
+    /// untruncated transcript and may keep the newest oversized result.
+    pub(super) fn cut_after_compaction(&self, mixed: bool, messages: &mut [Message]) {
+        if let Some(cap) = self.tool_result_truncation.filter(|_| mixed) {
+            truncate_tool_results(messages, cap);
         }
     }
 
     /// The preemptive route decision for a request `prompt_tokens` big that is
     /// over the trigger. Engages truncation when the route calls for it and
-    /// returns `true` when truncation alone has already brought the request
-    /// under budget (the caller then skips compaction).
+    /// reports [`OverTrigger::Done`] only when truncation alone has measurably
+    /// brought the request under budget (the caller then skips compaction).
     pub(super) fn route_over_trigger<Ctx: Send + Sync>(
         &self,
         ctx: &mut RunContext<Ctx>,
         request: &mut ModelRequest,
         prompt_tokens: u64,
-    ) -> bool {
+    ) -> OverTrigger {
         let Some(cap) = self.tool_result_truncation else {
-            return false;
+            return OverTrigger::Compact;
         };
         let reducible = tokens_for_bytes(reducible_tool_result_bytes(&request.messages, cap));
         let route =
@@ -457,7 +492,7 @@ impl ContextCompressionMiddleware {
             "[context_compression] preemptive route"
         );
         if !route.truncates() {
-            return false;
+            return OverTrigger::Compact;
         }
         self.engage_truncation(ctx.instance_id());
         ctx.mark_prompt_prefix_changed();
@@ -466,7 +501,7 @@ impl ContextCompressionMiddleware {
             // current request as well so the mixed route is safe even when the
             // subsequent compaction does not get below the provider limit.
             truncate_tool_results(&mut request.messages, cap);
-            return false;
+            return OverTrigger::CompactThenTruncate;
         }
         let from_tokens = total_message_tokens(&request.messages);
         truncate_tool_results(&mut request.messages, cap);
@@ -480,7 +515,19 @@ impl ContextCompressionMiddleware {
             from_tokens,
             to_tokens,
         });
-        true
+        // The estimate chose this route; the measured request decides whether
+        // it sufficed. Still over the trigger: compact as well, and cut the
+        // results again afterwards, since the compaction rebuilds the request
+        // from the untruncated transcript.
+        if to_tokens < from_tokens
+            && !self
+                .policy
+                .exceeds_trigger(to_tokens + schema_tokens(&request.tools))
+        {
+            OverTrigger::Done
+        } else {
+            OverTrigger::CompactThenTruncate
+        }
     }
 
     /// Marks `run` as truncating. Only a run `before_model` already tracks is
@@ -490,6 +537,17 @@ impl ContextCompressionMiddleware {
             state.truncating = true;
         }
     }
+}
+
+/// What the preemptive route decided for an over-trigger request.
+pub(super) enum OverTrigger {
+    /// Truncation alone brought the request under the trigger.
+    Done,
+    /// Compact; no truncation was applied for this request.
+    Compact,
+    /// Compact, then cut the tool results again (truncation was applied but
+    /// did not suffice, or only partly covers the overflow).
+    CompactThenTruncate,
 }
 
 /// Tokens the estimator charges for `bytes` of text.

@@ -318,6 +318,10 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
             request
         };
 
+        // The provider is reached only past the cache lookup and the wrap
+        // onion, so a cache hit or a short-circuiting middleware never claims
+        // `provider_started`.
+        ctx.mark_provider_started();
         let response = self
             .invoke_model_resolving(state, ctx, effective_request, call_id, binding, shape)
             .await?;
@@ -1215,10 +1219,19 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
         // transformed before it reached consumers.
         let mut streamed_text = String::new();
         let mut streamed_reasoning = String::new();
+        // Characters of `streamed_reasoning`, kept as a running count so the
+        // watchdog estimate below is in characters, not UTF-8 bytes, without
+        // walking the whole text on every delta.
+        let mut streamed_reasoning_chars: u64 = 0;
         let mut saw_streamed_content = false;
         let mut transformed_tools = StreamAccumulator::new();
         let mut saw_tool_delta = false;
         let mut stream_stall = StreamTextStallDetector::default();
+        // Client-side bound on hidden reasoning (see
+        // `RunPolicy::reasoning_watchdog`): the reasoning-token count at which
+        // a call that has shown nothing visible is ended as a dead call.
+        let reasoning_bound = self.policy.reasoning_watchdog.bound_for(request);
+        let watchdog_started = std::time::Instant::now();
 
         // Some providers pad the very first streamed text chunk with
         // whitespace that is a wire-format artifact, not content (see
@@ -1425,6 +1438,9 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
                 self.middleware
                     .run_on_model_delta(ctx, state, &mut model_delta)
                     .await?;
+                // A tool call middleware added counts as one the call has,
+                // for this delta and every later one.
+                saw_tool_delta |= model_delta.tool_call.is_some();
                 if model_delta.tool_call.is_some() {
                     stream_stall.reset();
                 } else if stream_stall.observe(&model_delta.content) {
@@ -1437,6 +1453,44 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
                     || !model_delta.reasoning.is_empty();
                 streamed_text.push_str(&model_delta.content);
                 streamed_reasoning.push_str(&model_delta.reasoning);
+                streamed_reasoning_chars += model_delta.reasoning.chars().count() as u64;
+                // Reasoning past the bound with nothing visible yet: end the
+                // call here as the dead call it was going to be, instead of
+                // waiting for the provider to reach the output cap. Dropping
+                // `stream` on return closes the connection. The loop sees the
+                // same response a cap-truncated call produces and runs its
+                // truncated-empty recovery.
+                if let Some(bound) = reasoning_bound
+                    && streamed_text.trim().is_empty()
+                    && !saw_tool_delta
+                    && message_delta.tool_call.is_none()
+                    && model_delta.tool_call.is_none()
+                    && estimated_reasoning_tokens(streamed_reasoning_chars) > u64::from(bound)
+                {
+                    let estimated = estimated_reasoning_tokens(streamed_reasoning_chars);
+                    let elapsed_ms = watchdog_started.elapsed().as_millis() as u64;
+                    tracing::warn!(
+                        target: "tinyagents::agent_loop",
+                        run_id = %ctx.run_id(),
+                        call_id = %call_id,
+                        bound,
+                        estimated_reasoning_tokens = estimated,
+                        elapsed_ms,
+                        "[stream] reasoning watchdog ended a call that reasoned past its budget with nothing visible"
+                    );
+                    ctx.emit(AgentEvent::ControlApplied {
+                        control: "reasoning_watchdog".to_string(),
+                        detail: format!(
+                            "model call `{call_id}` reasoned past its {bound}-token budget (about \
+                             {estimated} tokens in {elapsed_ms} ms) with no visible output; the call \
+                             was ended and is treated as a dead call"
+                        ),
+                    });
+                    return Ok(watchdog_dead_response(
+                        estimated,
+                        std::mem::take(&mut streamed_reasoning),
+                    ));
+                }
                 let forwarded_delta = MessageDelta {
                     text: model_delta.content.clone(),
                     reasoning: model_delta.reasoning.clone(),
@@ -1859,16 +1913,29 @@ impl<State: Send + Sync, Ctx: Send + Sync> ModelBaseCall<State, Ctx>
 /// Implements [`ToolBaseCall`] over a single resolved [`Tool`] so a
 /// [`crate::middleware::ToolMiddleware`] can wrap the real tool
 /// invocation.
-pub(super) struct ToolCallBase<State: Send + Sync, Ctx: Send + Sync> {
+pub(super) struct ToolCallBase<'h, State: Send + Sync, Ctx: Send + Sync> {
+    /// Services the nested calls the tool makes (C9).
+    pub(super) harness: &'h AgentHarness<State, Ctx>,
+    /// Nesting level of this call: `0` for a model-issued call, `n` for a call
+    /// nested `n` deep.
+    pub(super) level: usize,
     pub(super) dispatch: Arc<dyn crate::tool::ToolDispatch<State, Ctx>>,
     pub(super) options: tinytools::ToolCallOptions,
     pub(super) timeout_settings: Option<crate::tool::ToolTimeoutSettings>,
+    /// Nested-call ids, refusal budget and summaries for this logical call,
+    /// kept across every attempt a wrap middleware makes (retries).
+    pub(super) nested_state: super::nested::NestedState,
+    /// Whether this call already runs under the run-wide nested serialization
+    /// gate, so its own nested calls must not take it again.
+    pub(super) gate_held: super::nested::GateHold,
 }
 
-impl<State: Send + Sync, Ctx: Send + Sync> ToolBaseCall<State, Ctx> for ToolCallBase<State, Ctx> {
+impl<State: Send + Sync, Ctx: Send + Sync> ToolBaseCall<State, Ctx>
+    for ToolCallBase<'_, State, Ctx>
+{
     fn call<'a>(
         &'a self,
-        ctx: &'a mut RunContext<Ctx>,
+        ctx: &'a RunContext<Ctx>,
         state: &'a State,
         call: ToolCall,
     ) -> BoxToolFuture<'a> {
@@ -1877,6 +1944,15 @@ impl<State: Send + Sync, Ctx: Send + Sync> ToolBaseCall<State, Ctx> for ToolCall
                 settings.resolve(self.dispatch.tool().timeout_policy(&call.arguments))
             });
             let timeout_result = super::tools::timeout_result(&call, timeout);
+            let nested = super::nested::NestedCalls::new(
+                self.harness,
+                ctx,
+                state,
+                CallId::new(call.id.clone()),
+                self.level,
+                &self.nested_state,
+                self.gate_held,
+            );
             let future = super::tools::execute_tool_recovering_model_retry(self.dispatch.execute(
                 state,
                 CallId::new(call.id),
@@ -1884,20 +1960,75 @@ impl<State: Send + Sync, Ctx: Send + Sync> ToolBaseCall<State, Ctx> for ToolCall
                 self.options,
                 ctx,
             ));
-            match timeout.and_then(|resolved| resolved.deadline) {
-                Some(deadline) => match tokio::time::timeout(deadline, future).await {
-                    Ok(result) => result,
-                    Err(_) => Ok(timeout_result),
-                },
-                None => future.await,
-            }
+            let bounded = async {
+                match timeout.and_then(|resolved| resolved.deadline) {
+                    Some(deadline) => match tokio::time::timeout(deadline, future).await {
+                        Ok(result) => result,
+                        Err(_) => Ok(timeout_result),
+                    },
+                    None => future.await,
+                }
+            };
+            let mut result = nested.drive(bounded).await?;
+            nested.attach_summary(&mut result);
+            Ok(result)
         })
+    }
+}
+
+/// Reasoning tokens a streamed reasoning text of `reasoning_chars` characters
+/// (not UTF-8 bytes: a CJK character is three bytes and about one token)
+/// amounts to, estimated at three characters per token. Measured on deepseek-v4.1-flash, whose reasoning is
+/// dense with code, numbers and short tokens, 36k characters were about 13k
+/// tokens (2.7 per token); English prose runs nearer four. Three keeps the
+/// estimate on the low side for this kind of text, so a bound built on it
+/// fires a little late rather than early.
+fn estimated_reasoning_tokens(reasoning_chars: u64) -> u64 {
+    reasoning_chars / 3
+}
+
+/// The response the reasoning watchdog hands the loop in place of the call it
+/// ended: the shape a call truncated at its output cap has (`finish_reason =
+/// length`, no visible text, no tool call), with the estimated reasoning as
+/// its output usage so the recovery can judge the call's rate, and the
+/// reasoning that streamed kept as a `Thinking` block so the recovery can
+/// carry it forward (`RunPolicy::truncated_empty_carry_reasoning_chars`).
+fn watchdog_dead_response(estimated_reasoning_tokens: u64, reasoning: String) -> ModelResponse {
+    let usage = tinyinference_llm::Usage::new(0, estimated_reasoning_tokens);
+    let content = if reasoning.is_empty() {
+        Vec::new()
+    } else {
+        vec![tinyinference_llm::message::ContentBlock::Thinking {
+            text: reasoning,
+            signature: None,
+        }]
+    };
+    ModelResponse {
+        message: tinyinference_llm::message::AssistantMessage {
+            id: None,
+            content,
+            tool_calls: Vec::new(),
+            usage: Some(usage),
+            origin: None,
+        },
+        usage: Some(usage),
+        finish_reason: Some("length".to_string()),
+        raw: None,
+        resolved_model: None,
+        continue_turn: None,
+        served_from_cache: false,
+        correlation: None,
+        resolved_route: None,
     }
 }
 
 #[cfg(test)]
 #[path = "model_call_failover_tests.rs"]
 mod failover_test;
+
+#[cfg(test)]
+#[path = "model_call_watchdog_tests.rs"]
+mod watchdog_tests;
 
 /// Retargets an attempt's wire-level `request.model` at a fallback binding,
 /// but only when the request already carried an explicit model. Registry names

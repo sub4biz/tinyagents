@@ -177,6 +177,7 @@ fn journal_observation_content_follows_capture_gate() {
         obs(
             2,
             AgentEvent::ToolCompleted {
+                parent_call_id: None,
                 call_id: CallId::new("tool-1"),
                 tool_name: "search".to_string(),
                 started_at_ms: Some(1_010),

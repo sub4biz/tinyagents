@@ -75,6 +75,7 @@
 
 mod jobs;
 mod policy_run;
+mod status_map;
 mod types;
 
 const LOG_PREFIX: &str = "[subagent-tool]";

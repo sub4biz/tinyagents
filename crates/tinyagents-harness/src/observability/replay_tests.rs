@@ -23,6 +23,7 @@ fn seed_run_events(journal_root: &std::path::Path, count: usize) -> String {
     sink.subscribe(Arc::new(FanOutSink::new().with(journal_sink.clone())));
     for i in 0..count {
         sink.emit(AgentEvent::ToolStarted {
+            parent_call_id: None,
             call_id: format!("c{i}").into(),
             tool_name: format!("tool-{i}"),
             input: None,
@@ -138,6 +139,7 @@ async fn page_cursor_stays_in_journal_offset_space_across_dropped_events() {
             offset: sink_offset,
             ts_ms: 0,
             event: AgentEvent::ToolStarted {
+                parent_call_id: None,
                 call_id: format!("c{sink_offset}").into(),
                 tool_name: "t".into(),
                 input: None,
@@ -170,6 +172,7 @@ async fn page_cursor_advances_from_an_evicting_stores_retained_base() {
             offset: i,
             ts_ms: 0,
             event: AgentEvent::ToolStarted {
+                parent_call_id: None,
                 call_id: format!("c{i}").into(),
                 tool_name: "t".into(),
                 input: None,

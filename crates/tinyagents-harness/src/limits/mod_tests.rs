@@ -247,3 +247,43 @@ fn skipped_models_are_remembered_for_the_run_only() {
     tracker.skip_model_for_run("primary");
     assert!(tracker.is_model_skipped("primary"));
 }
+
+#[test]
+fn nested_tool_calls_share_the_tool_call_cap_with_recorded_calls() {
+    let mut tracker = LimitTracker::new(RunLimits::default().with_max_tool_calls(3));
+    tracker.record_tool_call().unwrap();
+    tracker.try_reserve_nested_tool_call().unwrap();
+    tracker.try_reserve_nested_tool_call().unwrap();
+    assert_eq!(tracker.nested_tool_calls(), 2);
+
+    // The cap is spent: a further nested slot and a further recorded call fail.
+    let nested = tracker.try_reserve_nested_tool_call().unwrap_err();
+    assert!(matches!(nested, TinyAgentsError::LimitExceeded(_)));
+    assert_eq!(tracker.nested_tool_calls(), 2, "a refusal reserves nothing");
+    assert!(tracker.record_tool_call().is_err());
+}
+
+#[test]
+fn a_released_nested_slot_can_be_reserved_again() {
+    let tracker = LimitTracker::new(RunLimits::default().with_max_tool_calls(1));
+    tracker.try_reserve_nested_tool_call().unwrap();
+    assert!(tracker.try_reserve_nested_tool_call().is_err());
+    tracker.release_nested_tool_call();
+    tracker.try_reserve_nested_tool_call().unwrap();
+
+    // Saturates rather than wrapping.
+    tracker.release_nested_tool_call();
+    tracker.release_nested_tool_call();
+    assert_eq!(tracker.nested_tool_calls(), 0);
+}
+
+#[test]
+fn max_nested_depth_defaults_to_zero_so_nested_calls_are_opt_in() {
+    assert_eq!(RunLimits::default().max_nested_depth, 0);
+    assert_eq!(
+        RunLimits::default()
+            .with_max_nested_depth(5)
+            .max_nested_depth,
+        5
+    );
+}

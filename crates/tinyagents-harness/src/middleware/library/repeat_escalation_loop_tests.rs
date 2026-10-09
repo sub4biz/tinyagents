@@ -164,3 +164,37 @@ async fn a_later_registered_after_tool_sees_the_marker_on_refused_calls() {
         "executed results are unmarked; refused ones are marked for every hook"
     );
 }
+
+#[tokio::test]
+async fn a_guard_halt_is_reported_as_a_halted_terminal_outcome() {
+    use crate::terminal::{TerminalClass, TerminalReason};
+    let steering = SteeringHandle::allow_all();
+    let summary: HaltSummarySlot = Arc::new(Mutex::new(None));
+    let mut harness: AgentHarness<()> = AgentHarness::new();
+    harness.register_model(
+        "mock",
+        Arc::new(MockModel::with_responses(
+            (0..12).map(repeat_call).collect::<Vec<_>>(),
+        )),
+    );
+    harness.register_tool(Arc::new(CountingTool {
+        runs: Mutex::new(0),
+    }));
+    harness.push_middleware(Arc::new(RepeatProgressMiddleware::new(
+        steering.clone(),
+        summary.clone(),
+        Arc::new(|_| false),
+    )));
+    let ctx = RunContext::new(RunConfig::new("repeat-halted"), ()).with_steering(steering);
+    let run = harness
+        .invoke_in_context_with_status(&(), ctx, vec![Message::user("go")])
+        .await
+        .unwrap()
+        .run;
+
+    assert!(run.paused.is_some(), "a halt still pauses the run");
+    let outcome = run.terminal.expect("outcome");
+    assert_eq!(outcome.reason, TerminalReason::Halted);
+    assert_eq!(outcome.class, TerminalClass::Failure);
+    assert_eq!(Some(outcome.message), summary.lock().unwrap().clone());
+}

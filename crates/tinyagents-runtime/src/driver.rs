@@ -29,6 +29,11 @@ pub struct DriverOutcome {
     pub partial: Option<TranscriptPartial>,
     /// Whether the driver ended at an interruptible point.
     pub interrupted: bool,
+    /// Typed classification of how the run ended, when the driver has one
+    /// ([`HarnessDriver`] always does). Preferred by the session over the
+    /// outcome it would derive from `interrupted`, so a run that stopped on a
+    /// cap or a deferral is not reported as `Completed`.
+    pub outcome: Option<tinyagents_harness::terminal::TerminalOutcome>,
 }
 
 /// A driver error which may retain model history and display-only partial text.
@@ -38,6 +43,11 @@ pub struct DriverFailure {
     pub error: RuntimeError,
     /// Work produced before failure, safe for partial transcript persistence.
     pub partial: Option<DriverOutcome>,
+    /// Typed classification of the failure, when the driver has one
+    /// ([`HarnessDriver`] always does). Delivered to
+    /// [`crate::SessionHooks::on_terminal_outcome`]; `None` falls back to a
+    /// classification derived from the error.
+    pub outcome: Option<tinyagents_harness::terminal::TerminalOutcome>,
 }
 
 /// Object-safe model/tool-loop invocation boundary.
@@ -80,6 +90,7 @@ impl<State: Send + Sync + 'static, C: Send + Sync + 'static> SessionDriver<C>
             request.tools.specs(),
         ) {
             return Err(DriverFailure {
+                outcome: None,
                 error: RuntimeError::ToolSnapshotMismatch,
                 partial: None,
             });
@@ -110,6 +121,7 @@ impl<State: Send + Sync + 'static, C: Send + Sync + 'static> SessionDriver<C>
             .iter()
             .rev()
             .find_map(|message| matches!(message, Message::Assistant(_)).then(|| message.text()));
+        let terminal = partial.run.terminal.clone();
         let outcome = DriverOutcome {
             history: partial.run.messages,
             output: output.clone(),
@@ -122,9 +134,11 @@ impl<State: Send + Sync + 'static, C: Send + Sync + 'static> SessionDriver<C>
                 .and(output)
                 .map(TranscriptPartial::new),
             interrupted: partial.run.paused.is_some(),
+            outcome: terminal.clone(),
         };
         match partial.error {
             Some(error) => Err(DriverFailure {
+                outcome: terminal,
                 error: RuntimeError::Driver(error.to_string()),
                 partial: Some(outcome),
             }),

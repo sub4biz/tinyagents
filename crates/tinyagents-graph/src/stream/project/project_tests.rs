@@ -72,11 +72,13 @@ fn stream_projection_folds_model_deltas_into_messages_in_order() {
 fn stream_projection_folds_tool_lifecycle_as_two_entries() {
     let mut projection = StreamProjection::new();
     projection.fold_agent_event(&AgentEvent::ToolStarted {
+        parent_call_id: None,
         call_id: CallId::from("call-1".to_string()),
         tool_name: "search".into(),
         input: None,
     });
     projection.fold_agent_event(&AgentEvent::ToolCompleted {
+        parent_call_id: None,
         call_id: CallId::from("call-1".to_string()),
         tool_name: "search".into(),
         started_at_ms: None,
@@ -101,6 +103,7 @@ fn stream_projection_folds_tool_lifecycle_as_two_entries() {
 fn stream_projection_folds_failed_tool_completion_as_failed_phase() {
     let mut projection = StreamProjection::new();
     projection.fold_agent_event(&AgentEvent::ToolCompleted {
+        parent_call_id: None,
         call_id: CallId::from("call-1".to_string()),
         tool_name: "search".into(),
         started_at_ms: None,
@@ -147,6 +150,7 @@ fn stream_projection_since_replays_only_items_after_the_given_cursor() {
     // snapshot can therefore be passed directly to `since` without dropping
     // the first event subsequently folded.
     projection.fold_agent_event(&AgentEvent::ToolStarted {
+        parent_call_id: None,
         call_id: CallId::from("call-1".to_string()),
         tool_name: "search".into(),
         input: None,

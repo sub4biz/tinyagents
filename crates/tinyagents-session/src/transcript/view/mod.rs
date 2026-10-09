@@ -16,7 +16,9 @@ use std::path::Path;
 use serde::Serialize;
 
 pub use project::{project_records, project_thread, project_thread_scoped, resolve_files_scoped};
-pub use types::{DisplayItem, ProjectedTranscript, SubagentStatus, ToolCallStatus};
+#[allow(deprecated)]
+pub use types::SubagentStatus;
+pub use types::{DisplayItem, ProjectedTranscript, ToolCallStatus, TranscriptSubagentStatus};
 
 /// Key under which the writer stamps per-result tool failures into a
 /// transcript message's extra metadata (`{call_id: {detail}}`); the
@@ -146,3 +148,7 @@ mod prompt_tools_tests;
 #[cfg(test)]
 #[path = "transcript_ordering_tests.rs"]
 mod ordering_tests;
+
+#[cfg(test)]
+#[path = "mod_status_alias_tests.rs"]
+mod status_alias_tests;
