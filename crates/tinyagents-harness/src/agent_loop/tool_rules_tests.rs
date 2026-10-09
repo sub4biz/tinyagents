@@ -2,6 +2,8 @@
 //! `tool_search` results and every call, including approval, nested calls,
 //! indirect targets and a hosted definition's own rules.
 
+use super::*;
+
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -11,7 +13,9 @@ use crate::context::{RunConfig, RunContext};
 use crate::host::{
     AllowAllSecurityGate, FixedModelResolver, HostCapabilities, StaticContextComposer,
 };
-use crate::runtime::{AgentHarness, AgentInvocation, AgentTurnRequest, RunPolicy};
+use crate::runtime::{
+    AgentHarness, AgentInvocation, AgentTurnRequest, RunPolicy, UnknownToolPolicy,
+};
 use crate::testkit::ScriptedModel;
 use crate::tool::ToolRulePolicy;
 use tinyagents_definition::{AgentDefinition, InMemoryDefinitionRegistry};
@@ -367,4 +371,122 @@ async fn a_hosted_definition_stacks_its_rules_on_the_policy() {
     assert_eq!(tool_names(&model.requests()[0]), ["file_read"]);
     assert_eq!(web.calls(), 0);
     assert!(tool_text(&run.messages, "c1").contains("not permitted by tool rules"));
+}
+
+// ── Review follow-ups ───────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn a_rewrite_target_carries_its_own_approval_rule() {
+    let model = Arc::new(ScriptedModel::new(vec![
+        calls(vec![("c1", "missing", json!({}))]),
+        ModelResponse::assistant("never reached"),
+    ]));
+    let mut harness: AgentHarness<()> = AgentHarness::new();
+    harness.register_model("scripted", model as _);
+    harness.with_policy(RunPolicy {
+        unknown_tool: UnknownToolPolicy::Rewrite {
+            tool_name: "send".to_string(),
+        },
+        tool_rules: ToolRulePolicy::new(rules(json!({ "rules": [
+            { "effect": "require_approval", "match": { "name": "send" } },
+        ] }))),
+        ..RunPolicy::default()
+    });
+    let send = RuleTool::new("send");
+    harness.register_tool(send.clone());
+
+    let run = run(&harness, "rewrite").await;
+
+    assert_eq!(send.calls(), 0, "the rewritten call waits for approval");
+    let deferred = run.deferred.expect("the run waits for approval");
+    assert_eq!(deferred.approvals.len(), 1);
+}
+
+#[tokio::test]
+async fn repaired_arguments_are_checked_against_the_rules_again() {
+    let mut malformed = ToolCall::new(
+        "c1",
+        "execute",
+        Value::String("{action: \"GMAIL_DELETE_EMAIL\"}".to_string()),
+    );
+    malformed.invalid = Some("unquoted key".to_string());
+    let mut response = ModelResponse::assistant("");
+    response.message.tool_calls.push(malformed);
+    let model = Arc::new(ScriptedModel::new(vec![
+        response,
+        ModelResponse::assistant("done"),
+    ]));
+    let policy = ToolRulePolicy::new(rules(json!({ "rules": [
+        { "id": "no-delete", "effect": "deny", "match": { "name": "*_delete_*" } },
+    ] })));
+    let execute = RuleTool::dispatcher("execute");
+    let mut harness = harness_with(model, policy);
+    harness.register_tool(execute.clone());
+
+    let run = run(&harness, "repaired").await;
+
+    assert_eq!(
+        execute.calls(),
+        0,
+        "the repaired call names a denied target"
+    );
+    assert!(tool_text(&run.messages, "c1").contains("rule 'no-delete'"));
+}
+
+#[tokio::test]
+async fn a_rule_can_withhold_tool_search_itself() {
+    let model = Arc::new(ScriptedModel::new(vec![
+        calls(vec![("s1", "tool_search", json!({"query": "deferred"}))]),
+        ModelResponse::assistant("done"),
+    ]));
+    let policy = ToolRulePolicy::new(rules(json!({ "rules": [
+        { "id": "no-discovery", "effect": "deny", "match": { "name": "tool_search" } },
+    ] })));
+    let mut harness = harness_with(model.clone(), policy);
+    harness.register_tool(RuleTool::deferred("deferred_open"));
+
+    let run = run(&harness, "no-search").await;
+
+    assert!(!tool_names(&model.requests()[0]).contains(&"tool_search".to_string()));
+    let answer = tool_text(&run.messages, "s1");
+    assert!(answer.contains("rule 'no-discovery'"), "{answer}");
+    assert!(!answer.contains("deferred_open"), "{answer}");
+}
+
+struct FamilyTool(&'static str);
+
+#[async_trait]
+impl Tool for FamilyTool {
+    fn name(&self) -> &str {
+        "dup"
+    }
+    fn description(&self) -> &str {
+        "same name, different family"
+    }
+    fn parameters_schema(&self) -> Value {
+        json!({ "type": "object" })
+    }
+    fn family(&self) -> Option<&str> {
+        Some(self.0)
+    }
+    async fn execute(&self, _arguments: Value) -> anyhow::Result<ToolResult> {
+        Ok(ToolResult::success(self.0))
+    }
+}
+
+#[tokio::test]
+async fn a_toolset_tool_never_takes_a_denied_registered_tools_name() {
+    let model = Arc::new(ScriptedModel::new(vec![ModelResponse::assistant("done")]));
+    let policy = ToolRulePolicy::new(rules(json!({ "rules": [
+        { "effect": "deny", "match": { "family": "registered" } },
+    ] })));
+    let mut harness = harness_with(model.clone(), policy);
+    harness.register_tool(Arc::new(FamilyTool("registered")));
+    let mut extra: crate::tool::ToolRegistry<(), ()> = crate::tool::ToolRegistry::new();
+    extra.register(Arc::new(FamilyTool("toolset")));
+    harness.with_toolset(Arc::new(extra));
+
+    run(&harness, "collision").await;
+
+    assert!(!tool_names(&model.requests()[0]).contains(&"dup".to_string()));
 }

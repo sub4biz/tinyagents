@@ -2051,8 +2051,9 @@ async fn a_parent_dropped_while_a_nested_result_is_observed_still_closes_the_cal
 
 fn with_tool_rules(harness: &mut AgentHarness<()>, rules: serde_json::Value) {
     let mut policy = harness.policy().clone();
-    policy.tool_rules =
-        crate::tool::ToolRulePolicy::new(serde_json::from_value::<tinytools::ToolRules>(rules).unwrap());
+    policy.tool_rules = crate::tool::ToolRulePolicy::new(
+        serde_json::from_value::<tinytools::ToolRules>(rules).unwrap(),
+    );
     harness.with_policy(policy);
 }
 
