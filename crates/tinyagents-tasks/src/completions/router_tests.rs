@@ -491,3 +491,41 @@ async fn a_failed_batch_claim_leaves_nothing_leased() {
     store.fail_from.store(usize::MAX, SeqCst);
     assert_eq!(router.claim_pending("p", 10).unwrap().len(), 2);
 }
+
+#[tokio::test]
+async fn record_with_retries_survives_a_transient_store_failure() {
+    use std::sync::atomic::Ordering::SeqCst;
+    let store = Arc::new(FailingSecondPut {
+        inner: InMemoryCompletionStore::new(),
+        puts: Default::default(),
+        fail_from: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let router = CompletionRouter::new(store.clone());
+    assert!(
+        router
+            .record_with_retries(record("t1", "p"), 1)
+            .await
+            .is_err()
+    );
+    // Fails once, then the store recovers.
+    store.puts.store(0, SeqCst);
+    store.fail_from.store(1, SeqCst);
+    let attempt = router.record_with_retries(record("t2", "p"), 1).await;
+    assert!(attempt.is_ok());
+    store.puts.store(0, SeqCst);
+    store.fail_from.store(0, SeqCst);
+    let handle = {
+        let store = store.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            store.fail_from.store(usize::MAX, SeqCst);
+        })
+    };
+    assert!(
+        router
+            .record_with_retries(record("t3", "p"), 5)
+            .await
+            .is_ok()
+    );
+    handle.await.unwrap();
+}

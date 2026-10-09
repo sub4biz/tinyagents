@@ -75,7 +75,7 @@ pub enum CompletionState {
     Pending,
     /// The parent has it.
     Delivered,
-    /// The parent collected the child explicitly, so it is never pushed.
+    /// The parent collected the child explicitly, so it is not pushed from then on.
     Tombstoned,
     /// Too many failed attempts. The host applies its own give-up policy.
     GaveUp,

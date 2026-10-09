@@ -143,7 +143,7 @@ hand-off and nothing product-specific:
   line is skipped with a warning. `compact(retain)` rewrites the log through a
   temp file and an atomic rename, dropping settled records older than `retain`.
 - `CompletionRouter` — `record` (idempotent per task id), `tombstone(task_id)`
-  (the parent waited on or collected the child, so it is never pushed; works
+  (the parent waited on or collected the child, so nothing further is routed; a message already pushed to a live queue is not retracted; works
   before the completion exists), `claim_pending(parent, max)` /
   `begin_turn(parent)` / `pull(parent, max)` (claim a batch and count an
   attempt; a claimed record is leased until resolved), `mark_delivered(ids)`,

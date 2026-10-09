@@ -109,7 +109,7 @@ pub async fn record_detached_completion(
         );
         return true;
     };
-    match target.router.record(record).await {
+    match target.router.record_with_retries(record, 3).await {
         Ok(outcome) => {
             tracing::debug!("{LOG_PREFIX} task_id={task_id} outcome={outcome:?}");
             true

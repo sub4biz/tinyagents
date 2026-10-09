@@ -265,8 +265,37 @@ impl CompletionRouter {
         Ok(RecordOutcome::Recorded { lane: Some(lane) })
     }
 
+    /// [`Self::record`], retried up to `attempts` times with a short backoff
+    /// when the store fails. Safe because `record` is idempotent per task id
+    /// (a retry after a write that actually landed reports `Duplicate`).
+    pub async fn record_with_retries(
+        &self,
+        record: CompletionRecord,
+        attempts: u32,
+    ) -> Result<RecordOutcome> {
+        let attempts = attempts.max(1);
+        let mut attempt = 1;
+        loop {
+            match self.record(record.clone()).await {
+                Ok(outcome) => return Ok(outcome),
+                Err(error) if attempt >= attempts => return Err(error),
+                Err(error) => {
+                    tracing::warn!(
+                        task_id = %record.task_id,
+                        attempt,
+                        error = %error,
+                        "{LOG_PREFIX} record failed, retrying"
+                    );
+                    tokio::time::sleep(Duration::from_millis(50 * u64::from(attempt))).await;
+                    attempt += 1;
+                }
+            }
+        }
+    }
+
     /// Withdraws a child's completion because the parent collected it itself
-    /// (waited on it, or read its result). A completion that has not arrived
+    /// (waited on it, or read its result). Suppresses routing from now on; a
+    /// message already pushed onto a live queue is not retracted. A completion that has not arrived
     /// yet is dropped when it does.
     pub fn tombstone(&self, task_id: &str) -> Result<TombstoneOutcome> {
         let mut state = self.lock()?;
@@ -290,7 +319,8 @@ impl CompletionRouter {
 
     /// Drops every pending completion for `parent_key` and everything that
     /// finishes for it later, until [`Self::resume_parent`]. For a deleted or
-    /// stopped parent. The flag is stored durably, so it holds across a restart
+    /// stopped parent. A message already pushed onto the parent's queue is not
+    /// retracted (the host clears that queue when it stops the parent). The flag is stored durably, so it holds across a restart
     /// (until [`Self::compact`] drops it after its retention window). Returns how many pending records were withdrawn.
     pub fn cancel_parent(&self, parent_key: &str) -> Result<usize> {
         let mut state = self.lock()?;
@@ -393,7 +423,7 @@ impl CompletionRouter {
         candidates.truncate(max);
         let mut claimed: Vec<CompletionRecord> = Vec::with_capacity(candidates.len());
         for mut record in candidates {
-            record.attempts += 1;
+            record.attempts = record.attempts.saturating_add(1);
             record.updated_at = SystemTime::now();
             if let Err(error) = self.store.put(&record) {
                 // The caller gets no ids on error, so none may stay leased.
