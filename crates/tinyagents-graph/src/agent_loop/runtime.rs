@@ -428,16 +428,8 @@ where
         request.reasoning = Some(mapped.clone());
     }
 
-    let started_record = ctx.emit(AgentEvent::ModelStarted {
-        call_id: call_id.clone(),
-        model: model_name.clone(),
-    });
-    status.set_last_event(started_record.id);
-    status.active_model_call = Some(call_id.clone());
-    ctx.active_model_call = Some(call_id.clone());
-    ctx.begin_model_call();
     // Same point as the direct loop: pending appends (steering) are announced,
-    // the previous turn closed, and this one opened, just before the call.
+    // the previous turn closed, and this one opened, just before `ModelStarted`.
     let turn = phases::lifecycle_start_turn(harness, ctx, &loop_state.messages);
     tracing::debug!(
         target: "tinyagents::agent_loop",
@@ -446,6 +438,14 @@ where
         "[graph_loop] turn started"
     );
 
+    let started_record = ctx.emit(AgentEvent::ModelStarted {
+        call_id: call_id.clone(),
+        model: model_name.clone(),
+    });
+    status.set_last_event(started_record.id);
+    status.active_model_call = Some(call_id.clone());
+    ctx.active_model_call = Some(call_id.clone());
+    ctx.begin_model_call();
     let base = DirectModelBase {
         model: binding.model.as_ref(),
     };
