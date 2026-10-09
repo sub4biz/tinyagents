@@ -13,9 +13,10 @@
 //!   (default [`DriverStore::DEFAULT_COLLECTION`]). Each entry is a document
 //!   `{ "ns": <namespace>, "key": <key>, "value": <value> }`, so a namespace
 //!   or key may hold any characters and `list` is an indexed query on `ns`.
-//! - [`DriverAppendStore`] maps each harness stream to a driver stream of the
-//!   same name, or with a prefix to `<len>:<prefix><stream>`; the length
-//!   keeps two prefixes from ever addressing one stream. Offsets are the
+//! - [`DriverAppendStore`] maps each harness stream to the driver stream
+//!   `<len>:<prefix><stream>`, the prefix empty when there is none. The
+//!   length is always written, so no two `(prefix, stream)` pairs, prefixed
+//!   or not, ever address one stream. Offsets are the
 //!   driver's dense offsets, which already match the [`AppendStore`]
 //!   contract.
 
@@ -130,7 +131,7 @@ impl Store for DriverStore {
 
     async fn list(&self, namespace: &str) -> Result<Vec<String>> {
         self.declared().await?;
-        let query = Query::filter(Filter::eq("ns", namespace)).limit(1_000);
+        let query = Query::filter(Filter::eq("ns", namespace));
         let found = self
             .docs
             .query_all(&self.collection, &query)
@@ -157,7 +158,7 @@ pub struct DriverAppendStore {
 }
 
 impl DriverAppendStore {
-    /// Map each harness stream to the driver stream of the same name.
+    /// Map each harness stream `s` to the driver stream `0:s`.
     pub fn new(streams: Arc<dyn StreamStore>) -> Self {
         Self::with_prefix(streams, "")
     }
@@ -173,11 +174,7 @@ impl DriverAppendStore {
     }
 
     fn name(&self, stream: &str) -> String {
-        if self.prefix.is_empty() {
-            stream.to_owned()
-        } else {
-            format!("{}:{}{stream}", self.prefix.len(), self.prefix)
-        }
+        format!("{}:{}{stream}", self.prefix.len(), self.prefix)
     }
 }
 

@@ -50,9 +50,6 @@ pub(super) const INDEX: &str = "session_transcripts";
 /// One document per write to a transcript: its append-only log.
 pub(super) const ENTRIES: &str = "session_transcript_entries";
 
-/// Entries read per driver round trip while replaying a log.
-const PAGE: usize = 500;
-
 /// Insert attempts before a contended write gives up.
 const CAS_ATTEMPTS: usize = 64;
 
@@ -358,10 +355,7 @@ impl HistoryInner {
         let query = Query::filter(
             Filter::eq("stem", self.stem.as_str()).and(Filter::gte("seq", replay.next_seq)),
         )
-        .sort(Sort::asc("seq"))
-        .limit(PAGE);
-        // `query_all` follows the cursors: `PAGE` bounds one round trip, not
-        // the replay.
+        .sort(Sort::asc("seq"));
         for stored in self.docs.query_all(ENTRIES, &query).await? {
             let seq = stored
                 .doc
@@ -469,9 +463,12 @@ impl HistoryInner {
                         .doc
                         .get("indexed_seq")
                         .and_then(Value::as_u64)
-                        .is_some_and(|indexed| indexed > seq)
+                        .is_some_and(|indexed| indexed >= seq)
             });
             if newer {
+                // Someone indexed this entry or a later one: the document is
+                // at least as fresh as this replay.
+                replay.indexed = Some(fields);
                 return Ok(());
             }
             let created_at = existing

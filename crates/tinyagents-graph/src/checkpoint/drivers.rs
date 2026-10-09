@@ -39,7 +39,7 @@ use tokio::sync::OnceCell;
 
 use super::{
     Checkpoint, CheckpointConfig, CheckpointId, CheckpointMetadata, Checkpointer, PendingWrite,
-    merge_writes, require_checkpoint_id,
+    decode_json_err, merge_writes, require_checkpoint_id,
 };
 
 /// How many times a compare-and-swap loop retries before giving up.
@@ -49,11 +49,6 @@ const CAS_ATTEMPTS: usize = 64;
 fn map_error(error: StorageError) -> TinyAgentsError {
     TinyAgentsError::Checkpoint(format!("storage driver: {error}"))
 }
-
-/// Documents read per driver call when following a query to its end.
-/// [`DocumentStoreExt::query_all`] follows the cursors, so this bounds one
-/// page, not the result.
-const PAGE: usize = 500;
 
 /// Longest id stored as is; longer ones are hashed.
 const MAX_KEY_LEN: usize = 400;
@@ -191,8 +186,7 @@ impl<State> DriverCheckpointer<State> {
     async fn thread_docs(&self, thread: &str) -> Result<Vec<Versioned<Value>>> {
         self.declared().await?;
         let query = Query::filter(Filter::eq("thread", thread))
-            .sort(Sort::asc("seq"))
-            .limit(PAGE);
+            .sort(Sort::asc("seq"));
         self.docs
             .query_all(&self.checkpoints, &query)
             .await
@@ -218,10 +212,11 @@ where
 {
     fn decode(stored: Versioned<Value>) -> Result<Checkpoint<State>> {
         let record = stored.doc.get("record").cloned().unwrap_or(Value::Null);
-        let mut checkpoint: Checkpoint<State> =
-            serde_json::from_value(record).map_err(|error| {
-                TinyAgentsError::Checkpoint(format!("storage driver: decode: {error}"))
-            })?;
+        // Through the shared classifier, so a `State` that no longer decodes
+        // is tagged `[schema]` exactly as the file and SQLite backends tag it
+        // (durable delegations prune such a checkpoint and start fresh).
+        let mut checkpoint: Checkpoint<State> = serde_json::from_value(record)
+            .map_err(|error| decode_json_err("storage driver checkpointer", "record", error))?;
         checkpoint.normalize();
         Ok(checkpoint)
     }
@@ -315,7 +310,7 @@ where
         self.declared().await?;
         let counters = self
             .docs
-            .query_all(&self.threads, &Query::all().limit(PAGE))
+            .query_all(&self.threads, &Query::all())
             .await
             .map_err(map_error)?;
         let mut threads = Vec::new();

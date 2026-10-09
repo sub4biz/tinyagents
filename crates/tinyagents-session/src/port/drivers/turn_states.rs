@@ -139,7 +139,7 @@ impl Inner {
     async fn query(&self, filter: Filter) -> Result<Vec<Versioned<TurnState>>, StorageError> {
         self.declared().await?;
         self.docs
-            .query_all(COLLECTION, &Query::filter(filter).limit(1_000))
+            .query_all(COLLECTION, &Query::filter(filter))
             .await?
             .into_iter()
             .map(decode)
