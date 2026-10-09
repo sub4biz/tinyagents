@@ -219,7 +219,7 @@ README.
 | File | Role |
 | --- | --- |
 | `lib.rs` | Module declarations and re-exports. |
-| `status.rs` | The `CompletionStatus` <-> `OrchestrationTaskStatus` conversions. |
+| `status.rs` | The `CompletionStatus` <-> `OrchestrationTaskStatus` conversions (tests in `status_tests.rs`); `NoEquivalentStatus` itself is in `types.rs`. |
 | `types.rs` | `NoEquivalentStatus`, task kind/status/spec/result/record/filter types, `OrchestrationToolKind`, `OrchestrationControlOutcome`, and the `DetachedTaskRegistry` snapshot/error types. |
 | `tool.rs` | `OrchestrationTool`, `SteeringRegistry`, tool constructors and schemas. |
 | `store.rs` | `TaskStore` trait, `InMemoryTaskStore`, `JsonlTaskStore`. |
