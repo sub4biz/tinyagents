@@ -12,6 +12,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use super::tool_changes;
+use crate::tool::ToolGate;
 use super::*;
 
 impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {

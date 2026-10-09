@@ -213,9 +213,10 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
 
         // Build the tool surface once (see `tool_surface.rs`): the direct tool
         // set plus the deferred catalogue behind the `tool_search` bridge. The
-        // host allow-list gates both halves; `resolve_tool_allowlist` (not a raw
-        // read of `binding.allowed_tools`) is what applies I-9's fail-closed
-        // default, so an empty declared list denies every tool.
+        // tool gate (the host allow-list plus the run's tool rules) gates both
+        // halves; `resolve_tool_allowlist` underneath it (not a raw read of
+        // `binding.allowed_tools`) is what applies I-9's fail-closed default,
+        // so an empty declared list denies every tool.
         let gate = self.resolve_tool_gate(ctx)?;
         let mut surface = self.build_tool_surface(ctx, messages, &gate).await?;
         self.check_structured_schema_name(&surface.tool_schemas)?;
