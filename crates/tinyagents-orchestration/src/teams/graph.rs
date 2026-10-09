@@ -13,10 +13,58 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use tinyagents_graph::export::GraphTopology;
+use tinyagents_harness::CancellationToken;
 use tinyagents_graph::stream::GraphEventSink;
 use tinyagents_graph::{
     ClosureStateReducer, Command, CompiledGraph, GraphBuilder, NodeContext, NodeResult,
 };
+
+use crate::subagent::{
+    AgentStepConfig, AgentStepError, AgentStepIdentity, StepSuccess, SubagentOutcomeKind,
+    run_agent_step,
+};
+
+const LOG_PREFIX: &str = "[team-member-step]";
+
+/// The driver-side policy and identity of one member step.
+///
+/// [`run_member_graph`] uses [`MemberStep::default`], which is inert (unlimited
+/// admission, no timeout, one attempt, no result trimming), so the worker runs
+/// exactly as it did before the step went through
+/// [`SubagentDriver`](crate::subagent::SubagentDriver). Hosts that want the
+/// driver's limits call [`run_member_graph_with`].
+#[derive(Clone)]
+pub struct MemberStep {
+    /// Spawn admission, timeout/retry/budget, result policy and role.
+    pub config: AgentStepConfig,
+    /// Team (admission scope) and member (task id, allowlist target).
+    pub identity: AgentStepIdentity,
+}
+
+impl MemberStep {
+    /// A step for `member_id` of `team_id` under `config`; the member id is
+    /// also the allowlist target.
+    pub fn new(
+        config: AgentStepConfig,
+        team_id: impl Into<String>,
+        member_id: impl Into<String>,
+    ) -> Self {
+        let member_id = member_id.into();
+        Self {
+            config,
+            identity: AgentStepIdentity::new(team_id, member_id.clone()).with_target(member_id),
+        }
+    }
+}
+
+impl Default for MemberStep {
+    fn default() -> Self {
+        Self {
+            config: AgentStepConfig::default(),
+            identity: AgentStepIdentity::new("team", "member"),
+        }
+    }
+}
 
 /// Terminal classification of a host worker run.
 ///
@@ -63,7 +111,50 @@ where
     F: Fn(String) -> FF + Clone + Send + Sync + 'static,
     FF: Future<Output = Result<()>> + Send + 'static,
 {
-    let mut graph = build_member_graph(run_worker, on_complete, on_failed)?;
+    run_member_graph_with(
+        event_sink,
+        MemberStep::default(),
+        run_worker,
+        on_complete,
+        on_failed,
+    )
+    .await
+}
+
+/// [`run_member_graph`] with explicit driver policy.
+///
+/// The `execute` node runs `run_worker` through
+/// [`SubagentDriver`](crate::subagent::SubagentDriver) (via
+/// [`run_agent_step`]) under `step`. Outcomes map onto the existing routing:
+/// a completed run goes to `on_complete` with its (result-policy trimmed)
+/// output; a worker-reported failure, spawn rejection, timeout or exceeded
+/// budget goes to `on_failed` with the reason; a worker `Err` still fails the
+/// graph run, unchanged.
+pub async fn run_member_graph_with<W, WF, C, CF, F, FF>(
+    event_sink: Option<Arc<dyn GraphEventSink>>,
+    step: MemberStep,
+    run_worker: W,
+    on_complete: C,
+    on_failed: F,
+) -> Result<()>
+where
+    W: Fn() -> WF + Clone + Send + Sync + 'static,
+    WF: Future<Output = Result<MemberOutcome>> + Send + 'static,
+    C: Fn(String) -> CF + Clone + Send + Sync + 'static,
+    CF: Future<Output = Result<()>> + Send + 'static,
+    F: Fn(String) -> FF + Clone + Send + Sync + 'static,
+    FF: Future<Output = Result<()>> + Send + 'static,
+{
+    let step = Arc::new(step);
+    let mut graph = build_member_graph(
+        move || {
+            let step = step.clone();
+            let run_worker = run_worker.clone();
+            async move { drive_member(&step, run_worker).await }
+        },
+        on_complete,
+        on_failed,
+    )?;
     if let Some(event_sink) = event_sink {
         graph = graph.with_event_sink(event_sink);
     }
@@ -72,6 +163,53 @@ where
         .await
         .map_err(|error| anyhow::anyhow!("member graph run failed: {error}"))?;
     Ok(())
+}
+
+/// Runs the host worker as one driver lifecycle and projects the typed
+/// outcome back onto [`MemberOutcome`].
+async fn drive_member<W, WF>(step: &MemberStep, run_worker: W) -> Result<MemberOutcome>
+where
+    W: Fn() -> WF + Clone + Send + Sync + 'static,
+    WF: Future<Output = Result<MemberOutcome>> + Send + 'static,
+{
+    let result = run_agent_step(
+        &step.config,
+        step.identity.clone(),
+        CancellationToken::new(),
+        move |_token| {
+            let fut = run_worker();
+            async move {
+                Ok(match fut.await? {
+                    MemberOutcome::Completed { output } => StepSuccess::new(output, ()),
+                    MemberOutcome::Failed { reason } => StepSuccess::incomplete(reason, ()),
+                })
+            }
+        },
+    )
+    .await;
+    match result {
+        Ok(result) => Ok(match result.outcome.status {
+            SubagentOutcomeKind::Completed => MemberOutcome::Completed {
+                output: result.outcome.output,
+            },
+            SubagentOutcomeKind::Incomplete(incomplete) => MemberOutcome::Failed {
+                reason: incomplete.reason,
+            },
+            SubagentOutcomeKind::Cancelled | SubagentOutcomeKind::AwaitingInput(_) => {
+                MemberOutcome::Failed {
+                    reason: "member step did not complete".to_owned(),
+                }
+            }
+        }),
+        Err(AgentStepError::Worker(error)) => Err(error),
+        Err(error @ AgentStepError::Rejected(_)) => {
+            tracing::debug!("{LOG_PREFIX} rejected member={} {error}", step.identity.task_id);
+            Ok(MemberOutcome::Failed {
+                reason: error.to_string(),
+            })
+        }
+        Err(error) => Err(anyhow::anyhow!("{error}")),
+    }
 }
 
 fn build_member_graph<W, WF, C, CF, F, FF>(

@@ -27,6 +27,7 @@ use tinyinference_llm::usage::UsageTotals;
 use super::{
     PersistedSubagentPause, PreparedSubagent, ResultPolicy, SpawnAdmission, SpawnRejection,
     SubAgentPolicy, SubagentCapabilities, SubagentDriver, SubagentError, SubagentExecution,
+    SubagentIncomplete,
     SubagentExecutor, SubagentOutcome, SubagentOutcomeKind, SubagentPausePersistenceDisposition,
     SubagentPersistence, SubagentPlanner, SubagentRequest, SubagentResume, SubagentRole,
     SubagentTaskKey, SubagentTerminalPersistenceDisposition,
@@ -117,6 +118,10 @@ pub struct StepSuccess<T> {
     pub usage: UsageTotals,
     /// Host payload returned alongside the outcome.
     pub value: T,
+    /// When set, the worker finished without a usable answer (a failure it
+    /// reports itself, not an error): the outcome is `Incomplete` with this
+    /// reason instead of `Completed`.
+    pub incomplete_reason: Option<String>,
 }
 
 impl<T> StepSuccess<T> {
@@ -126,6 +131,17 @@ impl<T> StepSuccess<T> {
             output: output.into(),
             usage: UsageTotals::default(),
             value,
+            incomplete_reason: None,
+        }
+    }
+
+    /// A worker-reported failure: the outcome is `Incomplete(reason)`.
+    pub fn incomplete(reason: impl Into<String>, value: T) -> Self {
+        Self {
+            output: String::new(),
+            usage: UsageTotals::default(),
+            value,
+            incomplete_reason: Some(reason.into()),
         }
     }
 
@@ -255,7 +271,12 @@ impl<T: Send + 'static> SubagentExecutor<()> for StepExecutor<T> {
         match result {
             Ok(success) => {
                 slot.value = Some(success.value);
-                let mut outcome = SubagentOutcome::completed(task_id, success.output);
+                let mut outcome = match success.incomplete_reason {
+                    Some(reason) => {
+                        SubagentOutcome::incomplete(task_id, SubagentIncomplete::new(reason))
+                    }
+                    None => SubagentOutcome::completed(task_id, success.output),
+                };
                 outcome.usage = success.usage;
                 Ok(outcome)
             }
