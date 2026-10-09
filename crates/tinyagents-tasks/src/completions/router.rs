@@ -133,7 +133,7 @@ impl CompletionRouter {
     /// delivery attempt). Every other case stays pending for the pull side.
     pub async fn record(&self, mut record: CompletionRecord) -> Result<RecordOutcome> {
         let push = {
-            let mut state = self.lock()?;
+            let state = self.lock()?;
             if state.cancelled_parents.contains(&record.parent_key) {
                 tracing::debug!(
                     task_id = %record.task_id,
