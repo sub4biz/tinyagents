@@ -64,10 +64,20 @@ types are kept as thin wrappers over the `From` impls.
 
 ## Boundaries
 
-The crate does not own teams or workflow DAGs. Graph-specific node lowering
-remains in `tinyagents-graph`, while provider calls, tool dispatch mechanics,
-events, and run contexts remain in `tinyagents-harness`. This crate composes
-those primitives into child-agent behavior.
+The crate owns subagent invocation and lifecycle (`subagent/`), durable team
+coordination (`teams/`: `TeamService`, `TeamLedger`, `run_member_graph`) and
+durable phase-DAG workflows (`workflow/`: `WorkflowEngine`, `WorkflowStore`).
+Generic graph execution remains in `tinyagents-graph`, while provider calls,
+tool dispatch mechanics, events, and run contexts remain in
+`tinyagents-harness`. This crate composes those primitives into child-agent
+behavior.
+
+`subagent::SubagentDriver` is the single agent-step engine (#349). Team member
+steps (`teams`) and workflow child steps (`workflow`) do not hand-roll their
+own lifecycle; both run through `subagent::run_agent_step`, which adapts a
+host-supplied worker onto the driver, so every agent step gets the same spawn
+admission, policy, result policy and typed outcome. See `teams/README.md` and
+`workflow/README.md`.
 
 Hosts remain responsible for agent definitions, model selection, credentials,
 workspace policy, durable storage implementations, and authorization. Hosted
