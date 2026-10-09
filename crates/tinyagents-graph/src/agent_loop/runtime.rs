@@ -321,6 +321,7 @@ where
     }
 
     phases::lifecycle_seed(ctx, loop_state.messages.len());
+    phases::lifecycle_resume(ctx, loop_state.turn as u32, None);
     let entry_len = loop_state.messages.len();
     let request = loop_state
         .pending_request
@@ -558,6 +559,13 @@ where
 {
     phases::lifecycle_seed(ctx, loop_state.messages.len());
     let entry_len = loop_state.messages.len();
+    // The turn that issued these calls began at (or before) the assistant
+    // message; a fresh runtime resuming an interrupted batch has no open turn.
+    phases::lifecycle_resume(
+        ctx,
+        loop_state.turn as u32,
+        Some(entry_len.saturating_sub(1)),
+    );
     let calls = std::mem::take(&mut loop_state.pending_tool_calls);
     let outcome = phases::execute_tool_batch(
         harness,

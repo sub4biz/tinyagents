@@ -58,6 +58,25 @@ impl TurnTracker {
         }
     }
 
+    /// Continues numbering from `completed_turns` (a resumed run in a fresh
+    /// runtime starts its tracker at zero) and, when `open_from` is given and no
+    /// turn is open, re-opens the in-flight turn that began at that transcript
+    /// index, without announcing it again.
+    pub(crate) fn adopt(&mut self, completed_turns: u32, open_from: Option<usize>) {
+        self.turn = self.turn.max(completed_turns);
+        if let Some(start) = open_from
+            && self.open.is_none()
+        {
+            tracing::debug!(
+                target: "tinyagents::agent_loop",
+                turn = self.turn,
+                start,
+                "[agent_loop] re-opened the in-flight turn after a resume"
+            );
+            self.open = Some((self.turn, start));
+        }
+    }
+
     /// Treats the first `len` messages as seed input if no seed was fixed yet.
     /// A no-op once seeded, so repeated node entries never swallow appends.
     pub(crate) fn ensure_seeded(&mut self, len: usize) {
@@ -227,6 +246,11 @@ impl<Ctx> RunContext<Ctx> {
 }
 
 impl<Ctx> RunContext<Ctx> {
+    /// See [`TurnTracker::adopt`].
+    pub(crate) fn adopt_turn_state(&mut self, completed_turns: u32, open_from: Option<usize>) {
+        self.turns.adopt(completed_turns, open_from);
+    }
+
     /// Fixes the lifecycle seed at `len` messages unless one is already set.
     pub(crate) fn ensure_turn_tracker_seeded(&mut self, len: usize) {
         self.turns.ensure_seeded(len);

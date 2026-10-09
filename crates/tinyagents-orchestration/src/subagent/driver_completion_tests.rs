@@ -456,6 +456,10 @@ async fn a_cancelled_child_is_recorded_as_cancelled() {
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].task_id, "t1");
     assert_eq!(pending[0].status, CompletionStatus::Cancelled);
+    // The executor's late answer stays on the outcome but must not be pushed
+    // to the parent as a usable result.
+    assert!(pending[0].result.text.is_empty(), "{:?}", pending[0].result);
+    assert!(pending[0].result.artifact.is_none());
 }
 
 #[tokio::test]

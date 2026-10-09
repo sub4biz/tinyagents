@@ -91,6 +91,12 @@ impl CompletionOrigin {
         omitted_chars: usize,
     ) -> Option<CompletionRecord> {
         let status = CompletionStatus::try_from(&outcome.status).ok()?;
+        if matches!(&outcome.status, SubagentOutcomeKind::Cancelled) {
+            // A cancel that lands after the executor returned keeps the child's
+            // late output on the outcome (`cancelled_preserving`); it must not
+            // reach the parent as a usable answer.
+            return Some(self.record(status, CompletionResult::default()));
+        }
         let text = match &outcome.status {
             SubagentOutcomeKind::Incomplete(incomplete) if outcome.output.is_empty() => {
                 incomplete.reason.clone()

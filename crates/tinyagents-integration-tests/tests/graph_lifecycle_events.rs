@@ -466,9 +466,10 @@ async fn an_interrupt_after_the_tool_batch_retracts_instead_of_closing_the_turn(
     let recorder = EventRecorder::new();
     let ctx = RunContext::new(RunConfig::new("pause-tools"), ()).with_events(recorder.sink());
     let rt = Arc::new(LoopRuntime::for_run(Arc::new(harness), Arc::new(()), ctx));
+    let checkpointer = Arc::new(InMemoryCheckpointer::<LoopState>::default());
     let graph = compile_loop(rt)
         .expect("compiles")
-        .with_checkpointer(Arc::new(InMemoryCheckpointer::<LoopState>::default()));
+        .with_checkpointer(checkpointer.clone());
     let first = graph
         .run_with_thread("t", LoopState::seed(vec![Message::user("go")]))
         .await
@@ -497,4 +498,48 @@ async fn an_interrupt_after_the_tool_batch_retracts_instead_of_closing_the_turn(
         !live.contains(&2),
         "discarded tool message left live: {events:?}"
     );
+
+    // A fresh runtime (a restart) resumes from the checkpoint: the re-run tools
+    // node announces its results and closes the turn it belongs to, with the
+    // turn numbering continuing from the checkpoint.
+    let mut second: AgentHarness<()> = AgentHarness::new();
+    second
+        .register_model(
+            "mock",
+            Arc::new(MockModel::with_responses(vec![ModelResponse::assistant(
+                "done",
+            )])),
+        )
+        .set_default_model("mock")
+        .register_tool(Arc::new(FakeTool::returning("lookup", "out")));
+    let rt2 = Arc::new(LoopRuntime::for_run(
+        Arc::new(second),
+        Arc::new(()),
+        RunContext::new(RunConfig::new("pause-tools"), ()).with_events(recorder.sink()),
+    ));
+    let resumed = compile_loop(rt2)
+        .expect("compiles")
+        .with_checkpointer(checkpointer)
+        .resume(
+            "t",
+            tinyagents_graph::Command {
+                update: None,
+                goto: Vec::new(),
+                resume: Some(json!({ "approved": true })),
+                resume_by_task: Default::default(),
+            },
+        )
+        .await
+        .expect("resume completes");
+    assert!(resumed.state.finished);
+    let events = lifecycle(&recorder.events());
+    let count = |prefix: &str| events.iter().filter(|e| e.starts_with(prefix)).count();
+    assert_eq!(count("turn.completed:1:c1"), 1, "{events:?}");
+    assert_eq!(count("turn.started:1"), 1, "{events:?}");
+    assert_eq!(
+        count("turn.started:2"),
+        1,
+        "numbering continues: {events:?}"
+    );
+    assert_eq!(count("turn.started"), count("turn.completed"), "{events:?}");
 }

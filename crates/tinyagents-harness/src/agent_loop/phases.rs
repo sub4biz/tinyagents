@@ -264,3 +264,17 @@ pub fn lifecycle_close_turn<State: Send + Sync, Ctx: Send + Sync>(
 pub fn lifecycle_retract<Ctx>(ctx: &mut RunContext<Ctx>, new_len: usize) {
     ctx.retract_transcript(new_len);
 }
+
+/// Re-aligns the lifecycle tracker with a run entered mid-flight (resumed from a
+/// checkpoint in a fresh runtime, whose tracker starts at zero): turn numbering
+/// continues from `completed_turns`, and when `open_turn_start` is `Some(index)`
+/// and no turn is open, the in-flight turn that began at that transcript index
+/// is re-opened (not announced again) so the next close reports it. Never moves
+/// numbering backwards, so it is safe to call on every node entry.
+pub fn lifecycle_resume<Ctx>(
+    ctx: &mut RunContext<Ctx>,
+    completed_turns: u32,
+    open_turn_start: Option<usize>,
+) {
+    ctx.adopt_turn_state(completed_turns, open_turn_start);
+}
