@@ -252,6 +252,14 @@ pub struct PreparedSubagent<C = ()> {
     /// Mints a fresh run context for each retry attempt (a context is consumed
     /// by its run). Without it the driver cannot retry and runs one attempt.
     pub retry_context: Option<AttemptContextFactory<C>>,
+    /// How the parent hears about this child's completion when the driver has a
+    /// [`CompletionRouter`](tinyagents_tasks::CompletionRouter). Ignored
+    /// without one.
+    pub notify_mode: NotifyMode,
+    /// The parent key completions are routed under; defaults to the request's
+    /// thread id, else the parent run id. Set it when the host's parent
+    /// identity is neither (a session key, say).
+    pub completion_parent: Option<String>,
 }
 
 /// Builds the run context for retry attempt `n` (`1` is the first retry).
@@ -279,7 +287,21 @@ impl<C> PreparedSubagent<C> {
             policy: SubAgentPolicy::default(),
             result_policy: ResultPolicy::default(),
             retry_context: None,
+            notify_mode: NotifyMode::default(),
+            completion_parent: None,
         }
+    }
+
+    /// Sets how the parent is told when this child finishes.
+    pub fn with_notify_mode(mut self, mode: NotifyMode) -> Self {
+        self.notify_mode = mode;
+        self
+    }
+
+    /// Sets the parent key the completion is routed under.
+    pub fn with_completion_parent(mut self, parent_key: impl Into<String>) -> Self {
+        self.completion_parent = Some(parent_key.into());
+        self
     }
 
     /// Sets the delegation role.
