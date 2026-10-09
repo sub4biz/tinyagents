@@ -222,6 +222,12 @@ pub struct StepContext {
     pub cancellation: CancellationToken,
     /// The configured delegation role the worker must enforce.
     pub role: SubagentRole,
+    /// Model-call cap from [`SubAgentBudget`](super::SubAgentBudget) call caps
+    /// (already tightened onto the child's `RunConfig`); the worker must
+    /// enforce it, as the crate cannot count an opaque worker's calls.
+    pub max_model_calls: Option<usize>,
+    /// Tool-call cap, as for [`Self::max_model_calls`].
+    pub max_tool_calls: Option<usize>,
 }
 
 type Work<T> = Arc<
@@ -285,6 +291,8 @@ impl<T: Send + 'static> SubagentExecutor<()> for StepExecutor<T> {
         let result = (self.work)(StepContext {
             cancellation: execution.cancellation.clone(),
             role: execution.prepared.role,
+            max_model_calls: execution.prepared.run_context.config.max_model_calls,
+            max_tool_calls: execution.prepared.run_context.config.max_tool_calls,
         })
         .await;
         let mut slot = self.slot.lock().expect("agent-step slot poisoned");
