@@ -9,7 +9,7 @@ stays typed, checkpointed, and observable. Workflows driven from a host
 orchestrator use these same runtime types.
 
 Each submodule keeps type definitions in `types.rs`, behavior in `mod.rs`, and
-unit tests in `test.rs` (per repo convention); complex submodules additionally
+unit tests in a sibling `<module>_tests.rs` (`mod_tests.rs` beside a `mod.rs`); complex submodules additionally
 carry their own `README.md` — see the module map below.
 
 ## Module map

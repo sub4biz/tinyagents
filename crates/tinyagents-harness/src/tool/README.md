@@ -141,7 +141,7 @@ the model. Re-exported here as `pub mod select` and via `pub use select::*`.
 | File | Role |
 | --- | --- |
 | `mod.rs` | `ToolRegistry`, `ToolDispatch`, `provider_schema`; wires the submodules together. |
-| `types.rs` | `ToolExecutionContext` (tests in `context_test.rs`). |
+| `types.rs` | `ToolExecutionContext` (tests in `context_tests.rs`). |
 | `injected.rs` | Injected (host-only) argument stripping and schema projection. |
 | `schema.rs` | `SchemaCleanr`, `CleaningStrategy`; low-level JSON Schema cleaning. |
 | `schema_prepare.rs` | Provider projection seam built on `schema.rs`; strict-mode sanitizer. |

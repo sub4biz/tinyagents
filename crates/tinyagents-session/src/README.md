@@ -112,7 +112,7 @@ build — there is no separate `fts5` cargo feature at 0.40, so do not add one.
 
 ## Operational constraints
 
-These are the non-obvious rules; each is pinned by a test in `test.rs`.
+These are the non-obvious rules; each is pinned by a test in `lib_tests.rs` and `store_tests.rs`.
 
 **Search input is plain text, not FTS5 syntax.** `SessionSearchParams::query` is
 translated to a quoted FTS5 expression before it reaches `MATCH`. Binding raw
@@ -191,4 +191,4 @@ gate fails — otherwise a retry after fixing an unrelated gate would fail
 | `run_ledger/` | background run + team coordination — see its own [README](./run_ledger/README.md) |
 | `threads/` | JSONL chat thread/message store with a cross-thread search index — see its own [README](./threads/README.md) |
 | `transcript.rs` + `transcript/` | durable, provider-neutral transcripts for KV-cache-stable resume — see its own [README](./transcript/README.md) |
-| `test.rs` | module-local unit tests |
+| `lib_tests.rs`, `store_tests.rs`, `migrations_test_tests.rs` | module-local unit tests |

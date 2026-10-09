@@ -107,7 +107,7 @@ loop.
 | `file_ops.rs` | `FileOpExtractor`, `DefaultFileOpExtractor`, `FileOperations`, and the `<read-files>` / `<modified-files>` section writer/parser carried by compaction summaries. |
 | `split_turn.rs` | `split_turn_start`, `summarize_split_turn`: a cut inside a turn summarizes the turn prefix with its own `SummaryKind::TurnPrefix` request. |
 | `mod_tests.rs` | Coverage for token estimation, trim strategies, pairing repair, policy triggering/planning, and `ConcatSummarizer`. |
-| `compaction/test.rs` | Coverage for cut points, split-turn merge, iterative summaries, `OverflowClassifier`. |
+| `compaction/compaction_tests.rs` | Coverage for cut points, split-turn merge, iterative summaries, `OverflowClassifier`. |
 
 ## Key invariants
 

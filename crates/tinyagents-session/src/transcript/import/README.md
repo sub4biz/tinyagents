@@ -65,7 +65,7 @@ Source files are never mutated or deleted.
 | `convert.rs` | Pure helpers: `parent_session_key` stem lineage, `sanitize_store_name`, `stream_name`, `effective_thread_id` (synthesizes `imported-{stem}` when `_meta` has none), `build_descriptor`, `journal_messages`. |
 | `ops.rs` | `run_import` scans, reads all, plans/writes per item, then writes the marker; `open_session_stores` opens the shared KV/journal handles over `{workspace}/tinyagents_store/{kv,journal}`. |
 | `live.rs` | Live dual-write (`write_live_turn`) and store-backed shadow comparison (`shadow_read_compare`); the host decides when to invoke either path. |
-| `*_test.rs` | Sibling test suites for `convert`, `live`, and `ops`. |
+| `*_tests.rs` | Sibling test suites for `convert`, `live`, and `ops`. |
 
 ## RPC
 

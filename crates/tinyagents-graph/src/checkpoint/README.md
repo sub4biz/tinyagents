@@ -39,7 +39,7 @@ crashes mid-execution.
   external dependencies.
 - `SqliteCheckpointer` (`sqlite.rs`, feature `sqlite`) — Sqlite-backed
   implementation for concurrent/multi-process access.
-- An in-memory backend is also available for tests (see `mod.rs`/`test.rs`);
+- An in-memory backend is also available for tests (see `mod.rs`/`mod_tests.rs`);
   suitable only for a single process's lifetime.
 
 ### Types (`types.rs`)

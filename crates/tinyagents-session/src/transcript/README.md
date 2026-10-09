@@ -132,7 +132,7 @@ Re-exported from `transcript::` (see `../transcript.rs`); reachable as
 | `history.rs` | `TranscriptHistory` / `TranscriptRead` / `TranscriptLocator` seam. |
 | `background.rs` | Out-of-band, idempotent assistant appends into a session's head. |
 | `turn_lock.rs` | Per-session async turn lock shared by live turns and background appends. |
-| `test.rs` | Module-local unit tests. |
+| `*_tests.rs` | Module-local unit tests (`transcript_tests.rs`, `session_tests.rs`, ...). |
 
 `../transcript.rs` (the module root, one level up) wires these together,
 re-exports the public surface, and carries the full format specification in

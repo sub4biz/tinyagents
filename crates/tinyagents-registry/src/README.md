@@ -51,20 +51,20 @@ only capabilities a human explicitly registered can be invoked.
   ([`ModelRegistry`], [`ToolRegistry`]).
   - `types.rs` — the [`CapabilityRegistry`] struct and storage maps.
   - `mod.rs` — registration and accessor methods.
-  - `test.rs` — tests for registration, alias, and lookup.
+  - `mod_tests.rs` — tests for registration, alias, and lookup.
 - **`component/`** — identity and discovery types: [`ComponentKind`],
   [`ComponentId`], [`ComponentMetadata`]. Used by every other part of the
   registry and by host applications.
   - `types.rs` — the data types.
   - `mod.rs` — constructors and string conversions.
-  - `test.rs` — tests for kind, id, and metadata.
+  - `mod_tests.rs` — tests for kind, id, and metadata.
 - **`router/`** — [`ModelRouter`], the declarative workload-tier layer.
   Maps host tier aliases to concrete models with capability gates and
   fallback chains. Holds policy, not models.
   - `types.rs` — [`WorkloadRoute`] struct.
   - `mod.rs` — [`ModelRouter`] registration, resolution, and fallback
     construction.
-  - `test.rs` — tests for routing, fallback, and capability gating.
+  - `mod_tests.rs` — tests for routing, fallback, and capability gating.
   - `README.md` — detailed design and example (see existing).
 - **`catalog.rs`** — [`ModelCatalog`]: offline model facts (prices, context
   windows, capabilities). Embedded at build time from a JSON snapshot.
