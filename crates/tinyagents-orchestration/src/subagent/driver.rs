@@ -169,13 +169,25 @@ impl<C: Send + 'static, H: Send + 'static> SubagentDriver<C, H> {
     ///
     /// Only the invocation that wins the durable terminal write records, so a
     /// coalesced follower or a replayed terminal never produces a second
-    /// completion. Only a spawn that set a notify mode is recorded. A
-    /// cancellation is not recorded (the parent asked for it), neither is a
-    /// pause (the same task completes later), nor an executor error (nothing
-    /// terminal was persisted, so the task may be re-run; the caller of `run`
-    /// has the error). A failure to record
-    /// is logged and never fails the run. Without this call the driver behaves
-    /// exactly as before.
+    /// completion. Only a spawn that set a notify mode is recorded:
+    ///
+    /// - a normal finish is recorded as success or incomplete;
+    /// - a cancellation is recorded as `Cancelled` (also when it lands after
+    ///   the planner but before the child launches; one before planning has no
+    ///   notify mode yet and is not recorded);
+    /// - an executor error (`Execution`, or `Transient` once retries are
+    ///   exhausted) is recorded as `Failed` and still returned to the caller.
+    ///   Host seam faults (task id mismatch, persistence, missing capability)
+    ///   are not the child failing and are not recorded. The router keeps the
+    ///   first record per task id, so a task re-run under the same id after a
+    ///   recorded failure does not add a second completion;
+    /// - a pause (awaiting input) is not recorded: it is not terminal, and the
+    ///   resume that eventually finishes the same task id records then. For
+    ///   the same reason an error while resuming a paused task is not
+    ///   recorded: its pause is still durable.
+    ///
+    /// A failure to record is logged and never fails the run. Without this
+    /// call the driver behaves exactly as before.
     pub fn with_completion_router(mut self, router: Arc<CompletionRouter>) -> Self {
         self.completions = Some(router);
         self
@@ -361,14 +373,23 @@ impl<C: Send + 'static, H: Send + 'static> SubagentDriver<C, H> {
                 actual: prepared.task_id,
             });
         }
+        // Known as soon as the planner has named the spawn's notify mode, so a
+        // cancel from here on is recorded too.
+        let completion_origin = self
+            .completions
+            .as_ref()
+            .and_then(|_| CompletionOrigin::new(&task_key, &prepared));
         if cancellation.is_cancelled() {
-            return self
+            let result = self
                 .persist_cancelled(
                     task_key,
                     SubagentOutcome::cancelled(prepared.task_id),
                     expected_pause,
                 )
+                .await?;
+            self.record_completion(completion_origin.as_ref(), &result, 0)
                 .await;
+            return Ok(result);
         }
         prepared.tools = restrict_tools(
             &prepared.tools,
@@ -391,10 +412,6 @@ impl<C: Send + 'static, H: Send + 'static> SubagentDriver<C, H> {
 
         let policy = prepared.policy.clone();
         let result_policy = prepared.result_policy.clone();
-        let completion_origin = self
-            .completions
-            .as_ref()
-            .and_then(|_| CompletionOrigin::new(&task_key, &prepared));
         let mut attempts = AttemptSource::from_prepared(&prepared);
         let mut attempt = 0usize;
         let mut execution = SubagentExecution {
@@ -478,18 +495,41 @@ impl<C: Send + 'static, H: Send + 'static> SubagentDriver<C, H> {
             }
             Err(SubagentError::Cancelled) => SubagentOutcome::cancelled(task_id),
             Err(_) if cancellation.is_cancelled() => SubagentOutcome::cancelled(task_id),
-            Err(error) => return Err(error),
+            Err(error) => {
+                // A resumed child still has its durable pause: it is not
+                // finished, and the router keeps the first record per task id,
+                // so a failed record here would shadow the eventual finish.
+                if expected_pause.is_none()
+                    && let (Some(router), Some(origin)) = (&self.completions, &completion_origin)
+                    && let Some(record) = origin.record_for_error(&error)
+                {
+                    deliver(router, record).await;
+                }
+                return Err(error);
+            }
         };
         let result = self
             .persist(task_key, outcome, expected_pause, &cancellation)
             .await?;
-        if let (Some(router), Some(origin)) = (&self.completions, &completion_origin)
+        self.record_completion(completion_origin.as_ref(), &result, omitted_chars)
+            .await;
+        Ok(result)
+    }
+
+    /// Records `result` when this invocation owns its host effects and the
+    /// outcome maps to a completion (a pause does not).
+    async fn record_completion(
+        &self,
+        origin: Option<&CompletionOrigin>,
+        result: &SubagentRunResult,
+        omitted_chars: usize,
+    ) {
+        if let (Some(router), Some(origin)) = (&self.completions, origin)
             && result.should_emit_host_effects()
             && let Some(record) = origin.record_for_outcome(&result.outcome, omitted_chars)
         {
             deliver(router, record).await;
         }
-        Ok(result)
     }
 
     async fn persist_cancelled(

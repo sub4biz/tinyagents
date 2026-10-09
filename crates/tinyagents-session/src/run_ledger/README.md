@@ -100,11 +100,11 @@ parent-facing note about interrupted *children* see
 | `ops.rs` | CRUD, listing, and coordination primitives (see below). |
 | `store.rs` | Schema entry point — a no-op now that all DDL lives in `crate::migrations`; kept as the conventional call site. |
 | `recovery.rs` | `classify_recovery` / `overall_recovery`: advisory restart-recovery verdicts for dangling tool calls (tests in `recovery_tests.rs`). |
-| `test.rs` | Module-local unit tests. |
+| `mod_tests.rs` | Module-local unit tests. |
 
 ## Operational constraints
 
-These are the non-obvious rules; most are pinned by a test in `test.rs`.
+These are the non-obvious rules; most are pinned by a test in `mod_tests.rs`.
 
 **An upsert reads its own write back inside the same transaction.** Every
 `upsert_*` function opens one `crate::store::with_transaction` call that

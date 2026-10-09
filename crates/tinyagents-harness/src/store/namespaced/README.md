@@ -49,7 +49,7 @@ flat trait keeps working unchanged, and [`FlatNamespacedStore`] adapts any
 | --- | --- |
 | `mod.rs` | `NamespacedStore` trait default methods, `InMemoryNamespacedStore` (the full `batch` implementation), `FlatNamespacedStore` adapter. |
 | `types.rs` | `Namespace`, `TtlConfig`, `Item`, `FilterOp`, `SearchQuery`, `ListNamespacesQuery`, `StoreOp`, `StoreResult`. |
-| `test.rs` | Namespace validation/matching, CRUD, subtree/filtered/paginated search, wildcard listing, TTL expiry/default, batch-result alignment, and the flat-`Store` adapter. |
+| `mod_tests.rs` | Namespace validation/matching, CRUD, subtree/filtered/paginated search, wildcard listing, TTL expiry/default, batch-result alignment, and the flat-`Store` adapter. |
 
 ## Operational constraints
 

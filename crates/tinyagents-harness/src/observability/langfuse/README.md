@@ -42,7 +42,7 @@ natural export boundary (end of run, end of turn, or on a timer).
 | --- | --- |
 | `mod.rs` | `LangfuseClient` impl: endpoint resolution, batch building (trace/run-span/observation-event projection), score batches, the shared `send_batch` transport, and the `clean_nulls`/`iso_ms` helpers. |
 | `types.rs` | Plain data types: `LangfuseAuth`, `LangfuseTraceConfig`, `LangfuseScoreValue`, `LangfuseScore` (with builder methods), `LangfuseClient`'s fields. |
-| `test.rs` | Unit tests for batch shape, trace-id resolution, run-span nesting, and score payloads. |
+| `mod_tests.rs` | Unit tests for batch shape, trace-id resolution, run-span nesting, and score payloads. |
 
 ## Trace shape
 

@@ -47,7 +47,7 @@ stops, pauses, and deferrals leave the queue untouched. Details:
 | --- | --- |
 | `mod.rs` | `RunQueue<T>` and its private `RunQueueInner<T>` storage. |
 | `types.rs` | `QueueLane`, `QueueMode`, `QueueStatus`, `RunQueueHandle`. |
-| `test.rs` | Per-lane push/drain ordering, status snapshots, `clear`, and lane independence. |
+| `mod_tests.rs` | Per-lane push/drain ordering, status snapshots, `clear`, and lane independence. |
 
 ## Operational constraints
 

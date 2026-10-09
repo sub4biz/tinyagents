@@ -34,8 +34,40 @@ On `RunCompleted` / `RunFailed` the `outcome` field is `Some` for every run this
 crate ends; it is `None` only when deserializing journals written before the
 field existed.
 
-Scope: the typed outcome is published by both the direct and the graph loop
-driver, but the turn and message lifecycle events (`TurnStarted`,
-`MessageAppended`, `MessageRetracted`, ...) are emitted by the direct loop only.
-The graph driver does not emit them yet, so graph-engine hosts should not rely
-on them.
+Scope: the typed outcome and the turn and message lifecycle events
+(`TurnStarted`, `TurnCompleted`, `MessageAppended`) are published by both the
+direct loop and the graph loop driver, with the same semantics: input messages
+are never announced, each appended message is announced exactly once, and a
+nested tool call never produces a `MessageAppended`. The graph driver announces
+appends at the same points as the direct loop (before a turn's `ModelStarted`,
+after the assistant reply, after a tool batch, and at the end of the run,
+including after `after_agent`). `MessageRetracted` and `TranscriptRewritten`
+come from direct-loop recovery paths the graph rendition does not implement. The
+step-by-step `LoopIter` and `compile_loop` graph announce the same events and
+treat the transcript present at their first node activation (any node) as the seed. A node that
+interrupts discards its state and re-runs on resume, so the appends it announced
+are retracted with `MessageRetracted` first. A model node's turn is closed on an
+interrupt; a tools node leaves its turn open, and the re-run closes it with the
+real results. A fresh runtime resuming from a checkpoint continues the turn
+numbering from the checkpoint and re-opens the in-flight tool turn (without a
+second `TurnStarted`).
+
+Known difference from the direct loop: the graph rendition closes a turn before
+an output-retry prompt is announced (the direct loop announces the prompt first).
+A model or tools node that fails closes the turn it opened (and announces the
+results of calls that ran before the failure), so `LoopIter` and `compile_loop`
+need no driver epilogue.
+
+## `provider_started` and summarizers
+
+`provider_started` is true once any provider call was dispatched, including a
+context-window summarizer's. Summarizer calls bypass the run context's dispatch
+marker, so the compaction middleware scopes each summarization with a dispatch
+tracker (`summarization::dispatch`): the built-in model-backed summarizers (`ModelSummarizer`, `TaskStateSummarizer`)
+mark it right before they call their model (host-defined `Summarizer` impls
+cannot, since `mark_dispatched` is crate-private; they still count when they
+fail with usage), and the middleware then sets the run-wide flag. A
+summarizer that fails with no usage after dispatching (a transport error) still
+reports `provider_started: true`; one rejected before dispatch (empty input,
+validation) does not. Only the run-wide flag is set, so a timeout during the main
+model call is still classified by that call's own dispatch.

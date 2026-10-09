@@ -23,6 +23,13 @@ loop.
   `SummarizationPolicy::plan` decides the split between `to_summarize` and
   `to_keep`; a `Summarizer` then condenses the former into a `SummaryRecord`
   carrying `CompressionProvenance`.
+- **Dispatch tracking** (`dispatch.rs`): summarizer calls bypass the run
+  context's provider-dispatch marker. `ContextCompressionMiddleware` scopes each
+  summarization with `track_dispatch`, `ModelSummarizer` calls `mark_dispatched`
+  right before it invokes its model, and the middleware then sets the run's
+  `provider_started`, so a summarizer that fails without usage after dispatching
+  still reports `TerminalOutcome::provider_started`. A rejection before dispatch
+  does not.
 - **Tool-call pairing** (`pairing.rs`) is the structural safety net both of
   the above rely on: a naive length-based cut point routinely separates an
   assistant tool-call turn from the tool results answering it, producing a
@@ -99,8 +106,8 @@ loop.
 | `response_overflow.rs` | `detect_response_overflow`, `ResponseOverflowDetection`: overflow read from a successful response (usage above the window, zero-output `length` stop, opt-in short `length` stop). |
 | `file_ops.rs` | `FileOpExtractor`, `DefaultFileOpExtractor`, `FileOperations`, and the `<read-files>` / `<modified-files>` section writer/parser carried by compaction summaries. |
 | `split_turn.rs` | `split_turn_start`, `summarize_split_turn`: a cut inside a turn summarizes the turn prefix with its own `SummaryKind::TurnPrefix` request. |
-| `test.rs` | Coverage for token estimation, trim strategies, pairing repair, policy triggering/planning, and `ConcatSummarizer`. |
-| `compaction/test.rs` | Coverage for cut points, split-turn merge, iterative summaries, `OverflowClassifier`. |
+| `mod_tests.rs` | Coverage for token estimation, trim strategies, pairing repair, policy triggering/planning, and `ConcatSummarizer`. |
+| `compaction/compaction_tests.rs` | Coverage for cut points, split-turn merge, iterative summaries, `OverflowClassifier`. |
 
 ## Key invariants
 

@@ -37,7 +37,7 @@ quorum, best-effort). That is what [`map_reduce`] provides.
 | --- | --- |
 | `types.rs` | `FailurePolicy`, `ParallelOptions`, `ItemOutcome<T>`, `ParallelOutcome<T>`. |
 | `mod.rs` | `map_reduce`: the bounded-concurrency, input-order-preserving driver. |
-| `test.rs` | Unit tests (ordering under out-of-order completion, each failure policy, timeouts, cancellation). |
+| `mod_tests.rs` | Unit tests (ordering under out-of-order completion, each failure policy, timeouts, cancellation). |
 | `claims/` | Shared-workspace claim arbitration (own `README.md`). |
 
 ## Operational constraints

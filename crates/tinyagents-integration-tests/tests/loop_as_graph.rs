@@ -67,14 +67,12 @@ fn harness_for(execution: LoopExecution, model: Arc<MockModel>) -> AgentHarness<
 /// subsequence of `actual` — the "same kind sequence, extra graph events
 /// allowed" contract.
 ///
-/// The turn/message lifecycle events (`turn.*`, `message.appended`) are emitted
-/// by the direct loop only for now; the graph driver does not announce them, so
-/// they are excluded from the expected sequence.
+/// The turn/message lifecycle events (`turn.*`, `message.appended`) are part of
+/// the contract: the graph driver announces them like the direct loop does, and
+/// `graph_lifecycle_events.rs` pins their exact shape.
 fn assert_kinds_subsequence(expected: &[String], actual: &[String]) {
     let mut cursor = 0;
-    let lifecycle =
-        |kind: &&String| !(kind.starts_with("turn.") || kind.as_str() == "message.appended");
-    for kind in expected.iter().filter(lifecycle) {
+    for kind in expected {
         let Some(offset) = actual[cursor..].iter().position(|k| k == kind) else {
             panic!(
                 "expected event kind `{kind}` not found (in order) in graph run's kinds: \
@@ -866,31 +864,5 @@ async fn a_middleware_limit_error_is_not_a_tool_cap_partial_stop() {
             matches!(result, Err(TinyAgentsError::LimitExceeded(_))),
             "{execution:?}: {result:?}"
         );
-    }
-}
-
-/// The turn/message lifecycle events are direct-loop only for now (a documented
-/// follow-up). Pin that so the gap is explicit and this parity file's filter
-/// cannot silently hide a change in either direction.
-#[tokio::test]
-async fn lifecycle_events_are_direct_loop_only_until_the_graph_driver_emits_them() {
-    for (execution, expect_lifecycle) in
-        [(LoopExecution::Direct, true), (LoopExecution::Graph, false)]
-    {
-        let model = Arc::new(MockModel::with_responses(vec![ModelResponse::assistant(
-            "done",
-        )]));
-        let harness = harness_for(execution, model);
-        let recorder = EventRecorder::new();
-        let ctx = RunContext::new(RunConfig::new("lc"), ()).with_events(recorder.sink());
-        harness
-            .invoke_in_context(&(), ctx, vec![Message::user("hi")])
-            .await
-            .unwrap();
-        let has_lifecycle = recorder
-            .events()
-            .iter()
-            .any(|event| event.kind() == "turn.started" || event.kind() == "message.appended");
-        assert_eq!(has_lifecycle, expect_lifecycle, "{execution:?}");
     }
 }

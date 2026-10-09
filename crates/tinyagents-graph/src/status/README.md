@@ -31,7 +31,7 @@ across levels of recursion.
 | --- | --- |
 | `types.rs` | The `GraphRunStatus` struct definition. |
 | `mod.rs` | `GraphRunStatus::new` and `::is_terminal`. |
-| `test.rs` | Unit tests for the constructor's defaults and terminal-state detection. |
+| `mod_tests.rs` | Unit tests for the constructor's defaults and terminal-state detection. |
 
 ## How it fits together
 

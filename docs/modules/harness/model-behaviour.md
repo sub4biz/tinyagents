@@ -31,7 +31,7 @@ capabilities (see [model.md](model.md)) — be driven by data:
   `tool_id_pattern`.
 
 All fields are additive and `serde(default)`, so existing serialized profiles
-deserialize unchanged. See `model/test.rs` in the vendor crate for the
+deserialize unchanged. See `model/mod_tests.rs` in the vendor crate for the
 transform and round-trip tests. Consuming these fields from harness
 `tool/schema_prepare.rs`, `structured/`, and `agent_loop/model_call.rs` is not
 yet wired up — the data model exists but the harness does not yet read it.

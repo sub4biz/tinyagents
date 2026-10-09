@@ -47,7 +47,7 @@ enforcement — only how the turn gets *set up* differs.
 | `mod.rs` | Builder/registration/accessor methods on `AgentHarness` (`register_model`, `push_agent_middleware`, `push_middleware`, `with_response_cache`, …). |
 | `types.rs` | Public type definitions: `RunPolicy` and its sub-policies, `PayloadCapture`, `AgentHarness`'s fields, `InvocationRuntime`, and the crate-private `HostInvocationBinding`. |
 | `agent.rs` | Host-driven invocation: definition resolution, security screening, context composition, memory/experience recall, the `invoke_agent*` entry points, and post-turn memory/learning/experience finalization. |
-| `test.rs` | Tests for `AgentHarness` construction/registration and `RunPolicy` defaults. |
+| `mod_tests.rs` | Tests for `AgentHarness` construction/registration and `RunPolicy` defaults. |
 
 ## Key invariants
 
@@ -89,7 +89,7 @@ enforcement — only how the turn gets *set up* differs.
 - `crate::context::RunContext` carries the crate-private
   `HostInvocationAuthority` for the duration of one invocation tree; only
   `runtime::agent` installs or reads it.
-- `crate::subagent` is the recursive delegation boundary: a sub-agent tool
+- `tinyagents_orchestration::subagent` is the recursive delegation boundary: a sub-agent tool
   invocation re-enters `invoke_agent_with_capabilities` /
   `invoke_agent_streaming_with_capabilities` with the parent's inherited
   authority rather than the plain `invoke_agent` entry point.

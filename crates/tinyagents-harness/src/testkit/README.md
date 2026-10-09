@@ -33,7 +33,7 @@ tests.
 | --- | --- |
 | `mod.rs` | Implementations for every double and for `Trajectory`'s assertion methods. |
 | `types.rs` | Struct/enum definitions for every type in the table above. |
-| `test.rs` | Exercises every double and the trajectory assertions with synthetic inputs. |
+| `mod_tests.rs` | Exercises every double and the trajectory assertions with synthetic inputs. |
 
 ## Operational constraints
 

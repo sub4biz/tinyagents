@@ -431,3 +431,7 @@ mod schema_walk_test;
 #[cfg(test)]
 #[path = "timeout_tests.rs"]
 mod timeout_test;
+
+#[cfg(test)]
+#[path = "mod_tests.rs"]
+mod tests;

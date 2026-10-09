@@ -54,7 +54,7 @@ metadata and `GraphEvent::RecursionDepthChanged`.
 | --- | --- |
 | `types.rs` | All type definitions and their `impl` blocks. |
 | `mod.rs` | Module doc only (re-exports; no additional behavior). |
-| `test.rs` | Unit tests for the stack contract and its enforcement inside the executor. |
+| `mod_tests.rs` | Unit tests for the stack contract and its enforcement inside the executor. |
 
 ## How it fits together
 

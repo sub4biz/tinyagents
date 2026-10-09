@@ -182,7 +182,7 @@ the boundary. Regression coverage:
 `higher_index_completed_sibling_not_rerun_after_interrupt_then_resume`,
 `higher_index_completed_sibling_not_rerun_after_failure_then_retry`, and
 `interrupted_and_uninterrupted_runs_reach_the_same_state`
-(`crates/tinyagents-graph/src/compiled/test.rs`).
+(`crates/tinyagents-graph/src/compiled/mod_tests.rs`).
 
 If a forked sub-agent interrupts, the parent run should surface the interrupt
 with enough namespace information to resume the correct child.

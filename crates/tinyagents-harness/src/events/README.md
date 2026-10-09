@@ -55,7 +55,7 @@ snapshot rather than a stream.
 | --- | --- |
 | `types.rs` | Every public type listed above, including the full `AgentEvent` variant vocabulary; this is the module's entire public surface. |
 | `mod.rs` | Behavior: `EventSink`'s ordered-dispatch/panic-safety implementation, `RecordingListener`/`EventJournal`/`HarnessRunStatus` impls, and poisoned-lock recovery helpers shared across them. |
-| `test.rs` | Fan-out/replay ordering (including under concurrency and a panicking listener), poisoned-lock recovery, `HarnessRunStatus` transitions, and `AgentEvent` serde round-trips. |
+| `mod_tests.rs` | Fan-out/replay ordering (including under concurrency and a panicking listener), poisoned-lock recovery, `HarnessRunStatus` transitions, and `AgentEvent` serde round-trips. |
 
 ## Operational constraints
 

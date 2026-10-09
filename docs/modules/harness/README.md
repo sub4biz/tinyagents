@@ -167,7 +167,7 @@ crates/tinyagents-harness/src/
   retry.rs
   run_queue/
     mod.rs
-    test.rs
+    mod_tests.rs
     types.rs
   runtime.rs
   steering.rs

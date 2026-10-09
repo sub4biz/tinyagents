@@ -58,7 +58,10 @@ impl SubagentExecutor<String> for Executor {
 }
 
 #[derive(Default)]
-struct Memory(Mutex<HashMap<SubagentTaskKey, SubagentOutcome>>);
+struct Memory {
+    terminals: Mutex<HashMap<SubagentTaskKey, SubagentOutcome>>,
+    pauses: Mutex<HashMap<SubagentTaskKey, SubagentOutcome>>,
+}
 
 #[async_trait]
 impl SubagentPersistence for Memory {
@@ -66,21 +69,30 @@ impl SubagentPersistence for Memory {
         &self,
         key: &SubagentTaskKey,
     ) -> Result<Option<SubagentOutcome>, SubagentError> {
-        Ok(self.0.lock().unwrap().get(key).cloned())
+        Ok(self.terminals.lock().unwrap().get(key).cloned())
     }
-    async fn load(&self, _: &SubagentTaskKey) -> Result<Option<SubagentResume>, SubagentError> {
-        Ok(None)
+    async fn load(&self, key: &SubagentTaskKey) -> Result<Option<SubagentResume>, SubagentError> {
+        Ok(self
+            .pauses
+            .lock()
+            .unwrap()
+            .get(key)
+            .and_then(|outcome| match &outcome.status {
+                SubagentOutcomeKind::AwaitingInput(pause) => Some(pause.resume.clone()),
+                _ => None,
+            }))
     }
     async fn load_pause(
         &self,
-        _: &SubagentTaskKey,
+        key: &SubagentTaskKey,
     ) -> Result<Option<SubagentOutcome>, SubagentError> {
-        Ok(None)
+        Ok(self.pauses.lock().unwrap().get(key).cloned())
     }
     async fn save_pause(
         &self,
-        _: PersistedSubagentPause,
+        pause: PersistedSubagentPause,
     ) -> Result<SubagentPausePersistenceDisposition, SubagentError> {
+        self.pauses.lock().unwrap().insert(pause.key, pause.outcome);
         Ok(SubagentPausePersistenceDisposition::Inserted)
     }
     async fn record_terminal(
@@ -89,7 +101,12 @@ impl SubagentPersistence for Memory {
         outcome: &SubagentOutcome,
         _: Option<&SubagentResume>,
     ) -> Result<SubagentTerminalPersistenceDisposition, SubagentError> {
-        self.0.lock().unwrap().insert(key.clone(), outcome.clone());
+        let mut terminals = self.terminals.lock().unwrap();
+        if terminals.contains_key(key) {
+            return Ok(SubagentTerminalPersistenceDisposition::Existing);
+        }
+        self.pauses.lock().unwrap().remove(key);
+        terminals.insert(key.clone(), outcome.clone());
         Ok(SubagentTerminalPersistenceDisposition::Inserted)
     }
 }
@@ -227,9 +244,42 @@ async fn an_incomplete_child_is_recorded_with_its_reason() {
 }
 
 #[tokio::test]
-async fn an_executor_failure_is_returned_and_not_recorded() {
+async fn an_executor_failure_is_returned_and_recorded_as_failed() {
     let router = router();
     let behaviour: Behaviour = Arc::new(|_| Err(SubagentError::Execution("boom".into())));
+    let failing =
+        driver(Some(NotifyMode::Off), Some("p"), behaviour).with_completion_router(router.clone());
+    // The caller of `run` still gets the error, unchanged.
+    let error = failing
+        .run(request("t1"), CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert!(matches!(error, SubagentError::Execution(_)), "{error:?}");
+    let pending = router.pending_for("p");
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].task_id, "t1");
+    assert_eq!(pending[0].status, CompletionStatus::Failed);
+    assert!(pending[0].result.text.contains("boom"), "{:?}", pending[0]);
+    // The router keeps the first record per task id: a re-run under the same
+    // id does not add a second completion.
+    let retry =
+        driver(Some(NotifyMode::Off), Some("p"), ok()).with_completion_router(router.clone());
+    retry
+        .run(request("t1"), CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(router.pending_for("p").len(), 1);
+}
+
+#[tokio::test]
+async fn a_transient_failure_that_exhausts_its_retries_is_recorded_as_failed() {
+    let router = router();
+    let behaviour: Behaviour = Arc::new(|_| {
+        Err(SubagentError::Transient {
+            message: "provider unavailable".into(),
+            tools_ran: false,
+        })
+    });
     let failing =
         driver(Some(NotifyMode::Off), Some("p"), behaviour).with_completion_router(router.clone());
     assert!(
@@ -238,15 +288,136 @@ async fn an_executor_failure_is_returned_and_not_recorded() {
             .await
             .is_err()
     );
+    let pending = router.pending_for("p");
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].status, CompletionStatus::Failed);
+}
+
+#[tokio::test]
+async fn a_host_seam_error_is_not_a_child_failure() {
+    let router = router();
+    let behaviour: Behaviour = Arc::new(|_| Ok(SubagentOutcome::completed("other-task", "x")));
+    let mismatched =
+        driver(Some(NotifyMode::Off), Some("p"), behaviour).with_completion_router(router.clone());
+    assert!(matches!(
+        mismatched
+            .run(request("t1"), CancellationToken::new())
+            .await,
+        Err(SubagentError::TaskIdMismatch { .. })
+    ));
     assert!(router.pending_for("p").is_empty());
-    // The same task can be re-run, and its success is not shadowed.
-    let retry =
-        driver(Some(NotifyMode::Off), Some("p"), ok()).with_completion_router(router.clone());
-    retry
+}
+
+#[tokio::test]
+async fn an_executor_failure_without_a_notify_mode_is_not_recorded() {
+    let router = router();
+    let behaviour: Behaviour = Arc::new(|_| Err(SubagentError::Execution("boom".into())));
+    let failing = driver(None, Some("p"), behaviour).with_completion_router(router.clone());
+    assert!(
+        failing
+            .run(request("t1"), CancellationToken::new())
+            .await
+            .is_err()
+    );
+    assert!(router.pending_for("p").is_empty());
+}
+
+#[tokio::test]
+async fn an_executor_failure_without_a_router_is_unchanged() {
+    let behaviour: Behaviour = Arc::new(|_| Err(SubagentError::Execution("boom".into())));
+    let plain = driver(Some(NotifyMode::Followup), Some("p"), behaviour);
+    let error = plain
+        .run(request("t1"), CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert!(matches!(error, SubagentError::Execution(m) if m == "boom"));
+}
+
+/// A behaviour that pauses on its first call and completes on the next.
+fn pause_then_complete() -> Behaviour {
+    let calls = Arc::new(Mutex::new(0usize));
+    Arc::new(move |task| {
+        let mut calls = calls.lock().unwrap();
+        *calls += 1;
+        if *calls == 1 {
+            let mut outcome = SubagentOutcome::completed(task, "waiting");
+            outcome.status = SubagentOutcomeKind::AwaitingInput(SubagentPause {
+                reason: "need approval".into(),
+                resume: SubagentResume::default(),
+            });
+            Ok(outcome)
+        } else {
+            Ok(SubagentOutcome::completed(task, "approved and done"))
+        }
+    })
+}
+
+#[tokio::test]
+async fn a_paused_child_is_not_recorded_until_it_finishes() {
+    let router = router();
+    let driver = driver(Some(NotifyMode::Off), Some("p"), pause_then_complete())
+        .with_completion_router(router.clone());
+    let first = driver
         .run(request("t1"), CancellationToken::new())
         .await
         .unwrap();
-    assert_eq!(router.pending_for("p")[0].status, CompletionStatus::Success);
+    assert!(matches!(
+        first.outcome.status,
+        SubagentOutcomeKind::AwaitingInput(_)
+    ));
+    assert!(
+        router.pending_for("p").is_empty(),
+        "a pause is not terminal"
+    );
+    // The resume finishes the same task id and records exactly once.
+    driver
+        .run(request("t1"), CancellationToken::new())
+        .await
+        .unwrap();
+    let pending = router.pending_for("p");
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].status, CompletionStatus::Success);
+    assert_eq!(pending[0].result.text, "approved and done");
+}
+
+#[tokio::test]
+async fn a_resume_that_errors_leaves_the_paused_task_unrecorded() {
+    let router = router();
+    let calls = Arc::new(Mutex::new(0usize));
+    let behaviour: Behaviour = {
+        let pause = pause_then_complete();
+        Arc::new(move |task| {
+            let mut calls = calls.lock().unwrap();
+            *calls += 1;
+            match *calls {
+                1 => pause(task),
+                2 => Err(SubagentError::Execution("resume crashed".into())),
+                _ => Ok(SubagentOutcome::completed(task, "finally done")),
+            }
+        })
+    };
+    let driver =
+        driver(Some(NotifyMode::Off), Some("p"), behaviour).with_completion_router(router.clone());
+    driver
+        .run(request("t1"), CancellationToken::new())
+        .await
+        .unwrap();
+    assert!(
+        driver
+            .run(request("t1"), CancellationToken::new())
+            .await
+            .is_err()
+    );
+    // The durable pause is still there, so the task is not finished: no
+    // failed record may shadow its eventual success.
+    assert!(router.pending_for("p").is_empty());
+    driver
+        .run(request("t1"), CancellationToken::new())
+        .await
+        .unwrap();
+    let pending = router.pending_for("p");
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].status, CompletionStatus::Success);
 }
 
 #[tokio::test]
@@ -264,7 +435,7 @@ async fn a_spawn_without_a_notify_mode_is_not_recorded() {
 }
 
 #[tokio::test]
-async fn a_cancelled_child_is_not_recorded() {
+async fn a_cancelled_child_is_recorded_as_cancelled() {
     let router = router();
     let token = CancellationToken::new();
     let behaviour: Behaviour = {
@@ -281,7 +452,94 @@ async fn a_cancelled_child_is_not_recorded() {
         result.outcome.status,
         SubagentOutcomeKind::Cancelled
     ));
-    assert!(router.pending_for("p").is_empty());
+    let pending = router.pending_for("p");
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].task_id, "t1");
+    assert_eq!(pending[0].status, CompletionStatus::Cancelled);
+    // The executor's late answer stays on the outcome but must not be pushed
+    // to the parent as a usable result.
+    assert!(pending[0].result.text.is_empty(), "{:?}", pending[0].result);
+    assert!(pending[0].result.artifact.is_none());
+}
+
+#[tokio::test]
+async fn a_cancel_before_the_child_launches_is_recorded_once_it_has_a_notify_mode() {
+    struct CancellingPlanner(CancellationToken);
+
+    #[async_trait]
+    impl SubagentPlanner<String> for CancellingPlanner {
+        async fn prepare(
+            &self,
+            request: SubagentRequest<String>,
+        ) -> Result<PreparedSubagent<String>, SubagentError> {
+            let prepared = Planner {
+                mode: Some(NotifyMode::Off),
+                parent: Some("p"),
+            }
+            .prepare(request)
+            .await?;
+            self.0.cancel();
+            Ok(prepared)
+        }
+    }
+
+    let router = router();
+    let token = CancellationToken::new();
+    let driver = SubagentDriver::new(SubagentCapabilities {
+        planner: Some(Arc::new(CancellingPlanner(token.clone()))),
+        executor: Some(Arc::new(Executor(ok()))),
+        persistence: Some(Arc::new(Memory::default())),
+    })
+    .unwrap()
+    .with_completion_router(router.clone());
+    let result = driver.run(request("t1"), token).await.unwrap();
+    assert!(matches!(
+        result.outcome.status,
+        SubagentOutcomeKind::Cancelled
+    ));
+    let pending = router.pending_for("p");
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].status, CompletionStatus::Cancelled);
+}
+
+/// An executor that returns `SubagentError::Cancelled` is converted to a
+/// cancelled outcome before persistence, so it is recorded as `Cancelled` and
+/// the call returns `Ok`.
+#[tokio::test]
+async fn an_executor_cancelled_error_is_recorded_as_cancelled() {
+    let router = router();
+    let behaviour: Behaviour = Arc::new(|_| Err(SubagentError::Cancelled));
+    let driver =
+        driver(Some(NotifyMode::Off), Some("p"), behaviour).with_completion_router(router.clone());
+    let result = driver
+        .run(request("t1"), CancellationToken::new())
+        .await
+        .unwrap();
+    assert!(matches!(
+        result.outcome.status,
+        SubagentOutcomeKind::Cancelled
+    ));
+    let pending = router.pending_for("p");
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].status, CompletionStatus::Cancelled);
+}
+
+#[tokio::test]
+async fn a_cancelled_child_without_a_router_is_unchanged() {
+    let token = CancellationToken::new();
+    let behaviour: Behaviour = {
+        let token = token.clone();
+        Arc::new(move |task| {
+            token.cancel();
+            Ok(SubagentOutcome::completed(task, "late"))
+        })
+    };
+    let plain = driver(Some(NotifyMode::Off), Some("p"), behaviour);
+    let result = plain.run(request("t1"), token).await.unwrap();
+    assert!(matches!(
+        result.outcome.status,
+        SubagentOutcomeKind::Cancelled
+    ));
 }
 
 #[tokio::test]

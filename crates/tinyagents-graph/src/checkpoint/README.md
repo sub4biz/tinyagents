@@ -39,7 +39,7 @@ crashes mid-execution.
   external dependencies.
 - `SqliteCheckpointer` (`sqlite.rs`, feature `sqlite`) — Sqlite-backed
   implementation for concurrent/multi-process access.
-- An in-memory backend is also available for tests (see `mod.rs`/`test.rs`);
+- An in-memory backend is also available for tests (see `mod.rs`/`mod_tests.rs`);
   suitable only for a single process's lifetime.
 
 ### Types (`types.rs`)
@@ -75,7 +75,7 @@ crashes mid-execution.
 | `mod.rs` | The `Checkpointer` trait and the in-memory backend. |
 | `file.rs` | `FileCheckpointer`. |
 | `sqlite.rs` | `SqliteCheckpointer` (feature `sqlite`). |
-| `test.rs` | Unit tests (put/get round-trips, namespace scoping, history, pruning). |
+| `mod_tests.rs` | Unit tests (put/get round-trips, namespace scoping, history, pruning). |
 
 ## Operational constraints
 

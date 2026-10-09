@@ -504,8 +504,9 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
                 }
                 // `site` describes this failure; the run may still have reached
                 // the provider on an earlier call.
-                // A failed summarizer already received a provider response, though
-                // summarizer calls bypass the context's dispatch marker.
+                // A failed summarizer already received a provider response; keep the
+                // match for summarizers that report usage but never marked dispatch
+                // (host-defined `Summarizer` impls cannot call `mark_dispatched`).
                 outcome.provider_started = ctx.provider_started()
                     || matches!(&error, TinyAgentsError::SummarizationUsage { .. });
                 terminal.run.terminal = Some(outcome.clone());

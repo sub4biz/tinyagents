@@ -206,7 +206,9 @@ where
                 )
                 .await?
             }
-            node::SETTLE => runtime::settle_node(&harness, &mut run_guard, loop_state).await?,
+            node::SETTLE => {
+                runtime::settle_node(&harness, &mut ctx_guard, &mut run_guard, loop_state).await?
+            }
             other => {
                 return Err(TinyAgentsError::Validation(format!(
                     "LoopIter::next: unknown loop node `{other}`"

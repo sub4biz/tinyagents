@@ -198,6 +198,7 @@ impl ModelSummarizer {
         let mut last_chars = 0;
         let mut usage: Option<tinyinference_llm::usage::Usage> = None;
         for attempt in 1..=SUMMARY_MARKUP_ATTEMPTS {
+            super::dispatch::mark_dispatched();
             let response = self.model.invoke(&(), request.clone()).await.map_err(|e| {
                 tracing::warn!(error = %e, "[tinyagents::summarize] summarizer model call failed");
                 Box::new((

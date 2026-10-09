@@ -31,7 +31,7 @@ Per-file `*_tests.rs` sit alongside each module (`auth_tests.rs`,
 `input_builder_tests.rs`, `session_store_tests.rs`, `settings_tests.rs`,
 `stream_parser_tests.rs`, `version_check_tests.rs`), plus `mod_tests.rs` for
 thread-key resolution and `ModelProfile` construction, and
-`pipeline_test.rs` for an end-to-end replay of a captured CC 2.x transcript.
+`pipeline_tests.rs` for an end-to-end replay of a captured CC 2.x transcript.
 
 ## CLI invocation
 

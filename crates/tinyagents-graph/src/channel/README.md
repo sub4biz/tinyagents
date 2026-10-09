@@ -66,7 +66,7 @@ working and conflict detection is strictly **opt-in**.
 | --- | --- |
 | `types.rs` | Type definitions and the channel/model overview. |
 | `mod.rs` | `Channel::merge` rules, `ChannelSet` map operations, the `ChannelState` ⇒ `StateReducer` bridge. |
-| `test.rs` | Unit tests (each channel kind's merge rule, conflict detection, step-stamping behavior). |
+| `mod_tests.rs` | Unit tests (each channel kind's merge rule, conflict detection, step-stamping behavior). |
 
 ## Operational constraints
 

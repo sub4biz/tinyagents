@@ -113,7 +113,7 @@ See [`compaction.md`](./compaction.md) for the full contract.
 | `render.rs` | `render_message_for_summary`. |
 | `trim.rs` | `trim_messages`/`trim_messages_with`/`trim_messages_to_token_budget_with`. |
 | `compaction.rs` | `find_cut_point`, `summarize_with_split`, `OverflowClassifier`, `CompactionContext`/`CompactionDecision`. |
-| `test.rs`, `compaction/test.rs` | Unit test coverage. |
+| `mod_tests.rs`, `compaction/compaction_tests.rs` | Unit test coverage. |
 
 ## Key invariants
 

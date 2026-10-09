@@ -68,7 +68,7 @@ separate public type to document.
 | --- | --- |
 | `types.rs` | Documentation-only: the two embedding modes, conceptually. |
 | `mod.rs` | `shared_subgraph_node`, `adapter_subgraph_node`, and the namespace/recursion-frame plumbing that makes nested checkpoints and recursion trees work. |
-| `test.rs` | Unit tests (shared vs. adapter state mapping, checkpoint namespace isolation, interrupt propagation, nested recursion limits). |
+| `mod_tests.rs` | Unit tests (shared vs. adapter state mapping, checkpoint namespace isolation, interrupt propagation, nested recursion limits). |
 
 ## Operational constraints
 

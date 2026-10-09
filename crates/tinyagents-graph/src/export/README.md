@@ -54,7 +54,7 @@ clone, `serde`-serializable, and safe to compare across builds.
 | --- | --- |
 | `types.rs` | The `GraphTopology` shape and its constituent structs; no behavior, `serde`-only. |
 | `mod.rs` | Topology extraction (`build_topology`, `node_parts`), structural `validate`ation, JSON round-trip, and Mermaid rendering. |
-| `test.rs` | Unit tests covering topology extraction from built/compiled graphs, JSON round-tripping, Mermaid output, and validation errors/warnings. |
+| `mod_tests.rs` | Unit tests covering topology extraction from built/compiled graphs, JSON round-tripping, Mermaid output, and validation errors/warnings. |
 
 ## Operational constraints
 

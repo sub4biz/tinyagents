@@ -209,6 +209,10 @@ where
     if ctx.cancellation.is_cancelled() {
         return Err(TinyAgentsError::Cancelled);
     }
+    // Everything on the transcript when the loop is first entered is input (or
+    // a resumed run's already-announced history); only later appends are
+    // announced. A no-op after the first activation.
+    phases::lifecycle_seed(ctx, loop_state.messages.len());
     match apply_pending_steering(ctx, &mut loop_state.messages)? {
         SteeringOutcome::Cancel => return Err(TinyAgentsError::Cancelled),
         SteeringOutcome::Pause => {
@@ -279,7 +283,7 @@ where
 /// The `model` node body: dispatches the request [`plan_node`] built,
 /// records usage, appends the assistant message, and routes to `tools` or
 /// `settle`.
-pub(crate) async fn model_node<State, Ctx>(
+async fn model_node_inner<State, Ctx>(
     harness: &AgentHarness<State, Ctx>,
     app_state: &State,
     ctx: &mut RunContext<Ctx>,
@@ -316,6 +320,9 @@ where
         return Err(TinyAgentsError::LimitExceeded(error.to_string()));
     }
 
+    phases::lifecycle_seed(ctx, loop_state.messages.len());
+    phases::lifecycle_resume(ctx, loop_state.turn, None);
+    let entry_len = loop_state.messages.len();
     let request = loop_state
         .pending_request
         .take()
@@ -424,6 +431,16 @@ where
         request.reasoning = Some(mapped.clone());
     }
 
+    // Same point as the direct loop: pending appends (steering) are announced,
+    // the previous turn closed, and this one opened, just before `ModelStarted`.
+    let turn = phases::lifecycle_start_turn(harness, ctx, &loop_state.messages);
+    tracing::debug!(
+        target: "tinyagents::agent_loop",
+        run_id = %ctx.run_id(),
+        turn,
+        "[graph_loop] turn started"
+    );
+
     let started_record = ctx.emit(AgentEvent::ModelStarted {
         call_id: call_id.clone(),
         model: model_name.clone(),
@@ -432,7 +449,6 @@ where
     status.active_model_call = Some(call_id.clone());
     ctx.active_model_call = Some(call_id.clone());
     ctx.begin_model_call();
-
     let base = DirectModelBase {
         model: binding.model.as_ref(),
     };
@@ -488,6 +504,7 @@ where
             response.message.clone(),
         ));
     loop_state.turn += 1;
+    phases::lifecycle_flush(harness, ctx, &loop_state.messages);
 
     let tool_calls = response.tool_calls().to_vec();
     loop_state.pending_tool_calls = tool_calls.clone();
@@ -504,7 +521,9 @@ where
     // has the real tool-routing decision to fall through to instead of an
     // arbitrary default.
     if let Some(control) = ctx.take_control() {
-        return apply_control(ctx, &mut loop_state, control, node::MODEL, route);
+        let result = apply_control(ctx, &mut loop_state, control, node::MODEL, route);
+        retract_on_interrupt(harness, ctx, &result, &loop_state.messages, entry_len, true);
+        return result;
     }
     // Stash the response for `settle` to extract structured output from.
     // Reusing `pending_request`'s sibling field would need a new field; keep
@@ -521,12 +540,63 @@ where
 /// the call site above without over-cloning it into `LoopState`.
 struct ModelOutcomeShadow<'a>(#[allow(dead_code)] &'a ModelResponse);
 
+/// The `model` node: [`model_node_inner`], closing the turn it opened if it
+/// fails. `GraphLoopDriver` closes on every exit as well, but `LoopIter` and
+/// the compiled graph propagate a node error with no epilogue.
+pub(crate) async fn model_node<State, Ctx>(
+    harness: &AgentHarness<State, Ctx>,
+    app_state: &State,
+    ctx: &mut RunContext<Ctx>,
+    run: &mut AgentRun,
+    status: &mut HarnessRunStatus,
+    loop_state: LoopState,
+) -> Result<NodeResult<LoopState>>
+where
+    State: Send + Sync,
+    Ctx: Send + Sync,
+{
+    let entry = loop_state.messages.clone();
+    let result = model_node_inner(harness, app_state, ctx, run, status, loop_state).await;
+    if result.is_err() {
+        phases::lifecycle_close_turn(harness, ctx, &entry);
+    }
+    result
+}
+
+/// The `tools` node: [`tools_node_inner`], announcing the results of calls that
+/// ran before a failure and closing the turn if it fails.
+pub(crate) async fn tools_node<State, Ctx>(
+    harness: &AgentHarness<State, Ctx>,
+    app_state: &State,
+    ctx: &mut RunContext<Ctx>,
+    run: &mut AgentRun,
+    status: &mut HarnessRunStatus,
+    loop_state: LoopState,
+) -> Result<NodeResult<LoopState>>
+where
+    State: Send + Sync,
+    Ctx: Send + Sync,
+{
+    let entry = loop_state.messages.clone();
+    let result = tools_node_inner(harness, app_state, ctx, run, status, loop_state).await;
+    if result.is_err() {
+        // A batch error leaves the partial transcript on the run.
+        let messages = if run.messages.len() > entry.len() {
+            &run.messages
+        } else {
+            &entry
+        };
+        phases::lifecycle_close_turn(harness, ctx, messages);
+    }
+    result
+}
+
 /// The `tools` node body: executes the batch [`model_node`] requested via
 /// [`phases::execute_tool_batch`] (the exact same admission /
 /// serial-or-concurrent execution / middleware pipeline the direct loop
 /// uses — see that function's docs), then routes back to `plan` for the next
 /// turn.
-pub(crate) async fn tools_node<State, Ctx>(
+async fn tools_node_inner<State, Ctx>(
     harness: &AgentHarness<State, Ctx>,
     app_state: &State,
     ctx: &mut RunContext<Ctx>,
@@ -538,6 +608,11 @@ where
     State: Send + Sync,
     Ctx: Send + Sync,
 {
+    phases::lifecycle_seed(ctx, loop_state.messages.len());
+    let entry_len = loop_state.messages.len();
+    // The turn that issued these calls began at (or before) the assistant
+    // message; a fresh runtime resuming an interrupted batch has no open turn.
+    phases::lifecycle_resume(ctx, loop_state.turn, Some(entry_len.saturating_sub(1)));
     let calls = std::mem::take(&mut loop_state.pending_tool_calls);
     let outcome = phases::execute_tool_batch(
         harness,
@@ -570,7 +645,14 @@ where
             }
             return Ok(goto(loop_state, node::SETTLE));
         }
-        Err(error) => return Err(error),
+        Err(error) => {
+            // Results of calls that ran before the failure are on the node's
+            // transcript, which the error path would otherwise drop; keep them
+            // on the run, as the direct loop does, so the driver's final
+            // lifecycle close announces and counts them.
+            run.messages = loop_state.messages.clone();
+            return Err(error);
+        }
     };
     loop_state.tool_calls = run.tool_calls;
     loop_state.executed_tools = run.executed_tools.clone();
@@ -581,8 +663,24 @@ where
     }
 
     if let Some(control) = ctx.take_control() {
-        return apply_control(ctx, &mut loop_state, control, node::TOOLS, node::PLAN);
+        let result = apply_control(ctx, &mut loop_state, control, node::TOOLS, node::PLAN);
+        // The tool turn stays open on an interrupt: the re-run closes it with the
+        // results it produces (a fresh runtime re-opens it via `lifecycle_resume`).
+        if !retract_on_interrupt(
+            harness,
+            ctx,
+            &result,
+            &loop_state.messages,
+            entry_len,
+            false,
+        ) {
+            // Every tool result of this batch is on the transcript: announce
+            // them and close the turn, as the direct loop does after its batch.
+            phases::lifecycle_close_turn(harness, ctx, &loop_state.messages);
+        }
+        return result;
     }
+    phases::lifecycle_close_turn(harness, ctx, &loop_state.messages);
 
     Ok(goto(loop_state, node::PLAN))
 }
@@ -590,8 +688,40 @@ where
 /// The `settle` node body: extracts/validates structured output when the
 /// turn planned one, drives the output-validation retry loop
 /// (`RunPolicy::output_retry`), and finishes the run.
+/// An interrupted node's state is discarded and the node re-runs from its entry
+/// state on resume, so the appends it already announced are retracted: the
+/// re-run announces them again, and events never name a message the kept
+/// transcript lacks.
+fn retract_on_interrupt<State: Send + Sync, Ctx: Send + Sync>(
+    harness: &AgentHarness<State, Ctx>,
+    ctx: &mut RunContext<Ctx>,
+    result: &Result<NodeResult<LoopState>>,
+    messages: &[tinyinference_llm::message::Message],
+    entry_len: usize,
+    close_turn: bool,
+) -> bool {
+    if !matches!(result, Ok(NodeResult::Interrupt(_))) {
+        return false;
+    }
+    tracing::debug!(
+        target: "tinyagents::agent_loop",
+        run_id = %ctx.run_id(),
+        entry_len,
+        "[graph_loop] node interrupted; retracting its announced appends"
+    );
+    phases::lifecycle_retract(ctx, entry_len);
+    // A model node's turn has no results to wait for, and a fresh runtime
+    // cannot carry this tracker's open turn over, so close it. A tools node
+    // leaves its turn open for the re-run to close with the real results.
+    if close_turn {
+        phases::lifecycle_close_turn(harness, ctx, &messages[..entry_len.min(messages.len())]);
+    }
+    true
+}
+
 pub(crate) async fn settle_node<State, Ctx>(
     harness: &AgentHarness<State, Ctx>,
+    ctx: &mut RunContext<Ctx>,
     run: &mut AgentRun,
     mut loop_state: LoopState,
 ) -> Result<NodeResult<LoopState>>
@@ -599,6 +729,11 @@ where
     State: Send + Sync,
     Ctx: Send + Sync,
 {
+    phases::lifecycle_seed(ctx, loop_state.messages.len());
+    // The final assistant message is the last append of its turn; close the
+    // turn before any output-retry prompt is pushed (that prompt is announced
+    // with the next turn's start).
+    phases::lifecycle_close_turn(harness, ctx, &loop_state.messages);
     if let Some(plan) = loop_state.pending_structured.take() {
         let extractor = StructuredExtractor::new(
             plan.strategy.clone(),

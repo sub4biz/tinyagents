@@ -12,7 +12,7 @@
 
 use async_trait::async_trait;
 
-use tinyagents_harness::agent_loop::phases::LoopDriver;
+use tinyagents_harness::agent_loop::phases::{self, LoopDriver};
 use tinyagents_harness::context::RunContext;
 use tinyagents_harness::error::{Result, TinyAgentsError};
 use tinyagents_harness::events::{AgentEvent, HarnessRunStatus};
@@ -107,7 +107,7 @@ where
                 node::TOOLS => {
                     runtime::tools_node(harness, state, ctx, run, status, loop_state).await
                 }
-                node::SETTLE => runtime::settle_node(harness, run, loop_state).await,
+                node::SETTLE => runtime::settle_node(harness, ctx, run, loop_state).await,
                 other => {
                     break Err(TinyAgentsError::Validation(format!(
                         "GraphLoopDriver: unknown loop node `{other}`"
@@ -256,16 +256,24 @@ where
                     .then(|| ctx.peek_last_limit())
                     .flatten();
                 let mut outcome = TerminalOutcome::from_error(error, site).with_limit_kind(kind);
-                // A failed summarizer already received a provider response, though
-                // summarizer calls bypass the context's dispatch marker.
+                // A failed summarizer already received a provider response; keep the
+                // match for summarizers that report usage but never marked dispatch
+                // (host-defined `Summarizer` impls cannot call `mark_dispatched`).
                 outcome.provider_started = ctx.provider_started()
                     || matches!(error, TinyAgentsError::SummarizationUsage { .. });
                 Some(outcome)
             }
         };
+        // Announce whatever the last turn appended and close it, on every exit
+        // path, as the direct loop does before the transcript moves onto the
+        // run (`run.messages` is the transcript as of the last node boundary).
+        phases::lifecycle_close_turn(harness, ctx, &run.messages);
         run.terminal = terminal.clone();
         status.mark_running(HarnessPhase::Middleware);
         let after_agent = harness.middleware().run_after_agent(ctx, state, run).await;
+        // `after_agent` may post-process `run.messages`; announce anything it
+        // appended (even if it then failed), as the direct loop does.
+        phases::lifecycle_flush(harness, ctx, &run.messages);
         if let Err(hook_error) = after_agent {
             if outcome.is_err() {
                 // The originating node failure stays authoritative, as in the

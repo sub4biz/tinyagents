@@ -109,9 +109,9 @@ depend on the `Middleware` hook ordering.
 
 ## Testing
 
-Each adaptor has a dedicated `test.rs` next to its `mod.rs`
-(`tool/toolset/{combined,filtered,prefixed,renamed,prepared,approval_required,external}/test.rs`)
+Each adaptor has a dedicated `mod_tests.rs` next to its `mod.rs`
+(`tool/toolset/{combined,filtered,prefixed,renamed,prepared,approval_required,external}/mod_tests.rs`)
 covering: basic wrapping behavior, `ToolExposureExplanation` correctness,
-prefix collision handling (`prefixed/test.rs`), and per-step `prepare`
-varying by `RunContext` (`prepared/test.rs`). `tool/toolset/test.rs` covers
+prefix collision handling (`prefixed/mod_tests.rs`), and per-step `prepare`
+varying by `RunContext` (`prepared/mod_tests.rs`). `tool/toolset/mod_tests.rs` covers
 chain composition end to end.

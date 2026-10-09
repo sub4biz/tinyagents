@@ -44,6 +44,6 @@ the model as tool errors rather than failing the run.
 
 ## Testing
 
-Unit tests in `crates/tinyagents-graph/src/todos/test.rs` (types, store
+Unit tests in `crates/tinyagents-graph/src/todos/mod_tests.rs` (types, store
 invariant, tool) and an end-to-end model-driven tool run in
 `tests/e2e_graph_todos.rs`.

@@ -51,7 +51,7 @@ limits are fail-closed.
 | ---------- | ---------------------------------------------------------------------- |
 | `types.rs` | `RunLimits`, `LimitBehavior`, `LimitOutcome`, `LimitKind`, and `RunLimits::default()`. |
 | `mod.rs`   | `RunLimits` builders, `LimitTracker` and its methods.                 |
-| `test.rs`  | Unit tests: counter/cap smoke path, fail-open vs. fail-closed reconciliation, error-vs-stop-with-partial exhaustion. |
+| `mod_tests.rs`  | Unit tests: counter/cap smoke path, fail-open vs. fail-closed reconciliation, error-vs-stop-with-partial exhaustion. |
 
 ## Operational constraints
 

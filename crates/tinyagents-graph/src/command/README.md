@@ -39,7 +39,7 @@ checkpoint.
 | --- | --- |
 | `types.rs` | `NodeResult`, `Command`, `RouteTarget`, `Send`, `Interrupt` definitions. |
 | `mod.rs` | Constructors and builder methods on those types; interrupt id generation. |
-| `test.rs` | Unit tests for command/interrupt construction. |
+| `mod_tests.rs` | Unit tests for command/interrupt construction. |
 
 ## How it fits together
 

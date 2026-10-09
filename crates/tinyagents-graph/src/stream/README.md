@@ -39,7 +39,7 @@ tree. `observability` is what makes this same event vocabulary durable
 | --- | --- |
 | `types.rs` | `GraphEvent` (every emitted variant), `StreamMode`. |
 | `mod.rs` | `GraphEventSink` trait, `NoopSink`, `CollectingSink`. |
-| `test.rs` | Unit tests for the two built-in sinks. |
+| `mod_tests.rs` | Unit tests for the two built-in sinks. |
 
 ## How it fits together
 
