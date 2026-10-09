@@ -917,7 +917,12 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
             ))
         })?;
 
-        if crate::tool::is_external_tool(tool.as_ref()) || tool.policy().access.approval_required {
+        let needs_approval = match rule_approval {
+            tinytools::ApprovalDirective::Required => true,
+            tinytools::ApprovalDirective::Waived => false,
+            tinytools::ApprovalDirective::Default => tool.policy().access.approval_required,
+        };
+        if crate::tool::is_external_tool(tool.as_ref()) || needs_approval {
             return Err(approval_error(&name));
         }
 
