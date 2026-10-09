@@ -2048,3 +2048,58 @@ async fn a_parent_dropped_while_a_nested_result_is_observed_still_closes_the_cal
     assert_eq!(nested_started(&recorder), 1);
     every_start_has_one_terminal_event(&recorder);
 }
+
+fn with_tool_rules(harness: &mut AgentHarness<()>, rules: serde_json::Value) {
+    let mut policy = harness.policy().clone();
+    policy.tool_rules = crate::tool::ToolRulePolicy::new(
+        serde_json::from_value::<tinytools::ToolRules>(rules).unwrap(),
+    );
+    harness.with_policy(policy);
+}
+
+#[tokio::test]
+async fn a_tool_rule_refuses_a_nested_call() {
+    let (outcome, runs) = nested_refusal(Leaf::new("leaf"), |harness| {
+        with_tool_rules(
+            harness,
+            json!({ "rules": [ { "id": "no-leaf", "effect": "deny", "match": { "name": "leaf" } } ] }),
+        );
+    })
+    .await;
+
+    assert!(
+        outcome.unwrap_err().contains("rule 'no-leaf'"),
+        "tool rules must bind nested calls"
+    );
+    assert_eq!(runs, 0);
+}
+
+#[tokio::test]
+async fn a_require_approval_rule_fails_a_nested_call_instead_of_deferring() {
+    let (outcome, runs) = nested_refusal(Leaf::new("leaf"), |harness| {
+        with_tool_rules(
+            harness,
+            json!({ "rules": [ { "effect": "require_approval", "match": { "name": "leaf" } } ] }),
+        );
+    })
+    .await;
+
+    assert!(outcome.unwrap_err().contains("requires approval"));
+    assert_eq!(runs, 0);
+}
+
+#[tokio::test]
+async fn an_auto_approve_rule_waives_a_nested_declared_approval() {
+    let mut policy = ToolPolicy::classified();
+    policy.access.approval_required = true;
+    let (outcome, runs) = nested_refusal(leaf_with("gated", policy), |harness| {
+        with_tool_rules(
+            harness,
+            json!({ "rules": [ { "effect": "auto_approve", "match": { "name": "gated" } } ] }),
+        );
+    })
+    .await;
+
+    assert!(outcome.is_ok(), "{outcome:?}");
+    assert_eq!(runs, 1);
+}

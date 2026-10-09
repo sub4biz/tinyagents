@@ -120,3 +120,49 @@ async fn unknown_tool_call_reports_tool_not_found() {
         .expect_err("nope is not registered");
     assert!(matches!(err, crate::error::TinyAgentsError::ToolNotFound(name) if name == "nope"));
 }
+
+struct TaggedDispatcher;
+
+use super::OverrideTool;
+use serde_json::Value;
+use tinytools::{Tool, ToolResult};
+
+#[async_trait::async_trait]
+impl Tool for TaggedDispatcher {
+    fn name(&self) -> &str {
+        "execute"
+    }
+    fn description(&self) -> &str {
+        "dispatches to a connector action"
+    }
+    fn parameters_schema(&self) -> Value {
+        serde_json::json!({ "type": "object" })
+    }
+    fn family(&self) -> Option<&str> {
+        Some("connector")
+    }
+    fn tags(&self) -> Vec<String> {
+        vec!["composio.scope:write".into()]
+    }
+    fn indirect_target(&self, args: &Value) -> Option<tinytools::IndirectCall> {
+        args["action"]
+            .as_str()
+            .map(|name| tinytools::ToolSubject::named(name).into())
+    }
+    async fn execute(&self, _args: Value) -> anyhow::Result<ToolResult> {
+        Ok(ToolResult::success("ok"))
+    }
+}
+
+/// A renamed or prefixed tool is the same tool to the host's tool rules.
+#[test]
+fn an_override_keeps_what_tool_rules_read() {
+    let tool = OverrideTool::new(Arc::new(TaggedDispatcher)).with_name("connector_execute");
+    assert_eq!(tool.name(), "connector_execute");
+    assert_eq!(tool.family(), Some("connector"));
+    assert_eq!(tool.tags(), ["composio.scope:write"]);
+    assert_eq!(
+        tool.indirect_target(&serde_json::json!({ "action": "GMAIL_DELETE_EMAIL" })),
+        Some(tinytools::ToolSubject::named("GMAIL_DELETE_EMAIL").into())
+    );
+}

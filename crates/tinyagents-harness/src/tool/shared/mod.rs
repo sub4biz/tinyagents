@@ -113,6 +113,17 @@ impl Tool for CanonicalSharedToolAdapter {
         self.resolved_tool().and_then(Tool::family)
     }
 
+    // Tool rules read these: a dropped tag lets a tag rule miss, and a
+    // dropped indirect target lets a dispatcher's real target escape.
+    fn tags(&self) -> Vec<String> {
+        self.resolved_tool().map(Tool::tags).unwrap_or_default()
+    }
+
+    fn indirect_target(&self, args: &serde_json::Value) -> Option<tinytools::IndirectCall> {
+        self.resolved_tool()
+            .and_then(|tool| tool.indirect_target(args))
+    }
+
     fn injected_arguments(&self) -> Vec<tinytools::ToolInjectedArgument> {
         self.resolved_tool()
             .map(Tool::injected_arguments)

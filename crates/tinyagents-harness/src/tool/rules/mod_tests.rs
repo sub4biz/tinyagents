@@ -123,3 +123,41 @@ fn admit_call_reports_approval_and_refusals() {
         CallGate::Admit(ApprovalDirective::Default)
     );
 }
+
+#[test]
+fn an_intrinsic_is_admitted_without_rules_and_ignores_the_allowlist() {
+    let allowed: HashSet<String> = ["registered".to_string()].into();
+    let gate = ToolGate::new(Some(allowed), &ToolRulePolicy::default(), None);
+    assert_eq!(
+        gate.admits_intrinsic("tool_search", Surface::Call),
+        CallGate::Admit(ApprovalDirective::Default),
+        "the registration allowlist does not name intrinsics"
+    );
+}
+
+#[test]
+fn an_intrinsic_follows_the_rules_per_surface() {
+    let rules: ToolRules = serde_json::from_value(json!({ "rules": [
+        { "id": "quiet", "effect": "hide", "match": { "name": "tool_search" } },
+        { "effect": "require_approval", "match": { "name": "tool_search" } },
+    ] }))
+    .expect("rules");
+    let gate = ToolGate::new(None, &ToolRulePolicy::new(rules), None);
+    match gate.admits_intrinsic("tool_search", Surface::Catalog) {
+        CallGate::Refuse(message) => assert!(message.contains("rule 'quiet'"), "{message}"),
+        other => panic!("hidden from the catalogue, got {other:?}"),
+    }
+    assert_eq!(
+        gate.admits_intrinsic("tool_search", Surface::Call),
+        CallGate::Admit(ApprovalDirective::Required)
+    );
+    let deny: ToolRules = serde_json::from_value(json!({ "rules": [
+        { "effect": "deny", "match": { "name": "tool_search" } },
+    ] }))
+    .expect("rules");
+    let gate = ToolGate::new(None, &ToolRulePolicy::new(deny), None);
+    assert!(matches!(
+        gate.admits_intrinsic("tool_search", Surface::Call),
+        CallGate::Refuse(_)
+    ));
+}
