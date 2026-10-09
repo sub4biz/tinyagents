@@ -42,7 +42,7 @@ hold a `CancellationToken`.
 | ---------- | -------------------------------------------------------------------- |
 | `types.rs` | `CancellationToken` and its private `CancelState` data layout.       |
 | `mod.rs`   | `CancellationToken` method implementations (`new`, `cancel`, `is_cancelled`, `cancelled`), `Default`/`Debug` impls. |
-| `test.rs`  | Unit tests for construction, cancellation, and cross-clone visibility. |
+| `mod_tests.rs` | Unit tests for construction, cancellation, and cross-clone visibility. |
 
 ## Operational constraints
 

@@ -40,7 +40,7 @@ invocation) be traced back up to the top-level run that spawned it.
 | ---------- | ---------------------------------------------------------------------- |
 | `types.rs` | Id newtype definitions, `ExecutionStatus`, `HarnessPhase`.             |
 | `mod.rs`   | `impl_string_id!` macro instantiations, id allocators, sequence/nonce/clock primitives. |
-| `test.rs`  | Unit tests: construction, `Display`/conversion round-tripping, serde encoding. |
+| `mod_tests.rs`  | Unit tests: construction, `Display`/conversion round-tripping, serde encoding. |
 
 ## Operational constraints
 

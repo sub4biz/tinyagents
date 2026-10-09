@@ -68,7 +68,7 @@ it, each owned by its own submodule:
 | `types.rs` | `StructuredStrategy`, `StructuredOutput`, `StructuredOutcome`, `StructuredExtractor` struct definitions. |
 | `repair.rs` | `JsonRepair`, `parse_lenient` and the repair-ladder rungs. |
 | `validate.rs` | Local, non-`$ref` JSON Schema subset validator. |
-| `test.rs` | Extraction, strategy-selection, and empty-response tests. `repair.rs`/`validate.rs` keep their own inline `#[cfg(test)] mod test`. |
+| `mod_tests.rs` | Extraction, strategy-selection, and empty-response tests. `repair.rs` and `validate.rs` have their own `repair_test_tests.rs` and `validate_test_tests.rs`. |
 
 ## Key invariants
 

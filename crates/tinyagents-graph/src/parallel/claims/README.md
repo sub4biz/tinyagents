@@ -58,7 +58,7 @@ list, not whatever prefix or key a host wraps it in.
 | --- | --- |
 | `types.rs` | `WorkspaceClaim`, `ClaimPathError`, `ClaimConflict`, `DispatchMode`, `DispatchPlan`. |
 | `mod.rs` | `parse_relative_claim_paths`, `paths_overlap`, `writes_shared_workspace`, `plan_shared_workspace_dispatch`. |
-| `test.rs` | Unit tests (path parsing/safety, overlap semantics, planner ordering and conflict reporting). |
+| `mod_tests.rs` | Unit tests (path parsing/safety, overlap semantics, planner ordering and conflict reporting). |
 
 ## Operational constraints
 

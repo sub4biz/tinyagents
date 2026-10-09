@@ -69,7 +69,7 @@ fields still happen to decode (an empty `executions` list, say) is structurally
 readable but semantically wrong for the current graph, and would otherwise be
 resumed as if it were current.
 
-`test.rs` pins the exact serialized JSON of a fully-populated state, of the
+`mod_tests.rs` pins the exact serialized JSON of a fully-populated state, of the
 default state, and of a pre-versioned record. A field addition that drifts the
 shape fails those tests rather than reaching a user's disk unnoticed. Changing
 the shape deliberately means bumping `CURRENT_SCHEMA_VERSION` in the same

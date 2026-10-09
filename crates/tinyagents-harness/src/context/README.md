@@ -47,7 +47,7 @@ middleware, the agent loop, and graph nodes code against.
 | `types.rs` | All type definitions: `RunConfig`, `RunLineage`, `RunContext`, `MiddlewareControl`. |
 | `mod.rs`   | `RunConfig`/`RunContext` method implementations, custom `RunConfig` `Deserialize` (with legacy wire-field migration), instance-id minting, metadata merge helper. |
 | `stats.rs` | `ContextStatistics` and the two statistics-computing free functions.  |
-| `test.rs`  | Unit tests for defaults, builders, child derivation, control precedence, deadline/limit tracking. |
+| `mod_tests.rs`  | Unit tests for defaults, builders, child derivation, control precedence, deadline/limit tracking. |
 
 ## Operational constraints
 

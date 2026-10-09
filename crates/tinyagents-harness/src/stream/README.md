@@ -40,7 +40,7 @@ pay nothing for the coupling.
 | `mod.rs` | `StreamSink` method implementations and the standalone `stream()` filter helper. |
 | `project.rs` | The `AgentEvent` → `StreamChunk` projection: `project_event`, `project_event_for_modes`, `projected_mode`, and the routing table in its module docs. |
 | `types.rs` | `StreamMode`, `StreamChunk`, `StreamSink` type definitions. |
-| `test.rs` | `StreamSink` filtering/push/drain/peek/enable/disable, `StreamChunk::mode` mapping, and the `stream()` helper. |
+| `mod_tests.rs` | `StreamSink` filtering/push/drain/peek/enable/disable, `StreamChunk::mode` mapping, and the `stream()` helper. |
 
 ## Operational constraints
 

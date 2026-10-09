@@ -4,7 +4,7 @@ The default model-tool-model agent loop: the innermost turn of the recursive
 harness.
 
 This loop is where one model call is driven to completion. Because a whole
-harness can be exposed as a tool (`harness::subagent::SubAgentTool`), the
+harness can be exposed as a tool (`tinyagents_orchestration::subagent::SubAgentTool`), the
 tools this loop executes may themselves be other agents — "a model calling a
 model" is just this loop nested inside one of its own tool calls. Each
 invocation runs inside a `RunContext` that tracks recursion depth, fans
@@ -273,7 +273,7 @@ error surfaced by a model, tool, middleware, or structured-output extraction.
 | `model_switch.rs` | Applies a steered `SwitchModel` to the turn request before binding resolution, and decides where a fallback walk starts for a switched model. |
 | `stream.rs` | Caller-consumable streaming entry point (`invoke_stream`/`invoke_stream_in_context`) that projects the run's `EventSink` into an `AgentStreamItem` stream. |
 | `types.rs` | `AgentLoopResult`, `PartialRunOutcome`, and the private `LoopExit`. |
-| `test.rs` | Unit tests (limits, retry/fallback, tool execution, structured extraction). |
+| `mod_tests.rs` | Unit tests (limits, retry/fallback, tool execution, structured extraction). |
 
 ## Operational constraints
 

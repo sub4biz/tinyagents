@@ -52,7 +52,7 @@ channel-style state.
 | --- | --- |
 | `types.rs` | `Reducer`, `StateReducer` traits; the built-in marker structs. |
 | `mod.rs` | `impl` blocks wiring each marker/closure type to its trait. |
-| `test.rs` | Unit tests for every built-in reducer and the closure-backed ones. |
+| `mod_tests.rs` | Unit tests for every built-in reducer and the closure-backed ones. |
 
 ## How it fits together
 

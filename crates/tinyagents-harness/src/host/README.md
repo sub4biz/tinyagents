@@ -71,7 +71,7 @@ embedding, not as a way to fake "unconfigured."
 | `progress_sink.rs` | `ProgressEvent`, `ProgressSink` trait, `NoopProgressSink`, `RecordingProgressSink`. |
 | `security_gate.rs` | `SecurityGate` trait, `ToolCallRequest`, `GateDecision`, `ScreenOutcome`, `ContentOrigin`. |
 | `tool_outcome_classifier.rs` | `ToolOutcomeClassifier` trait, `OutcomeClass`, `ErrorFieldClassifier`. |
-| `test.rs` | Bundle-level tests: the required/optional split and the hand-written `Clone`. |
+| `mod_tests.rs` | Bundle-level tests: the required/optional split and the hand-written `Clone`. |
 
 ## Value types are inert
 

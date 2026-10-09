@@ -53,8 +53,8 @@ default and a real git-worktree-backed implementation.
 | `types.rs` | The `WorkspaceIsolation` trait. |
 | `policy.rs` | `enforce_workspace_path`, the fail-closed path gate (paired with the descriptor's lexical `allows` check, which lives in `tinytools`). |
 | `git.rs` | `GitWorktreeIsolation` and the standalone git-worktree management functions. |
-| `git/test.rs` | Tests for the git-worktree isolation provider (spawns real `git` subprocesses against a temp repo). |
-| `test.rs` | Tests for the descriptor-allows and `SharedRootWorkspace`/event-emission hooks. |
+| `git/git_tests.rs` | Tests for the git-worktree isolation provider (spawns real `git` subprocesses against a temp repo). |
+| `mod_tests.rs` | Tests for the descriptor-allows and `SharedRootWorkspace`/event-emission hooks. |
 
 ## Operational constraints
 

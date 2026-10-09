@@ -55,7 +55,7 @@ The richer, TTL-aware, batch-oriented sibling trait — see its own README.
 | `mod.rs` | Implementations of `Store` and `AppendStore` for every backend, plus `StoreRegistry`. |
 | `types.rs` | The `Store`/`AppendStore` traits and every backend struct/field. |
 | `namespaced/` | `NamespacedStore` — hierarchical namespaces, TTL, filtering, pagination, batching. See `namespaced/README.md`. |
-| `test.rs` | Coverage for every backend: round-tripping, namespace isolation, sanitization, atomicity, offset monotonicity/tailing, retention eviction, and JSONL crash-recovery edge cases. |
+| `mod_tests.rs` | Coverage for every backend: round-tripping, namespace isolation, sanitization, atomicity, offset monotonicity/tailing, retention eviction, and JSONL crash-recovery edge cases. |
 
 ## Operational constraints
 

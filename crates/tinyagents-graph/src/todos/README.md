@@ -76,4 +76,4 @@ let tool = TodoTool::new(store.clone());
 | `types.rs` | Item/list model, `parse_status`, `render_markdown`, `normalise_list`, `TodosSnapshot`. |
 | `store.rs` | `Store`-backed `replace`/`list`/`clear`, per-thread RMW lock, single-in-progress invariant. |
 | `tool.rs` | The `todo` tool. |
-| `test.rs` | Unit tests (types, store, tool). |
+| `mod_tests.rs` | Unit tests (types, store, tool). |

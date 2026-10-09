@@ -141,7 +141,7 @@ the model. Re-exported here as `pub mod select` and via `pub use select::*`.
 | File | Role |
 | --- | --- |
 | `mod.rs` | `ToolRegistry`, `ToolDispatch`, `provider_schema`; wires the submodules together. |
-| `types.rs` | `ToolExecutionContext` (tests in `context_test.rs`). |
+| `types.rs` | `ToolExecutionContext` (tests in `context_tests.rs`). |
 | `injected.rs` | Injected (host-only) argument stripping and schema projection. |
 | `schema.rs` | `SchemaCleanr`, `CleaningStrategy`; low-level JSON Schema cleaning. |
 | `schema_prepare.rs` | Provider projection seam built on `schema.rs`; strict-mode sanitizer. |
@@ -149,7 +149,7 @@ the model. Re-exported here as `pub mod select` and via `pub use select::*`.
 | `shared/` | `CanonicalSharedToolAdapter` (a `tinytools::Tool` over shared, non-cloneable registries) and `EarlyExitHook` (pause the run when a designated tool succeeds). |
 | `timeout.rs` | `ToolTimeoutSettings`, `ResolvedToolTimeout`. |
 | `select/` | Prompt-driven tool ranking (own submodule; see its README/module doc). |
-| `*_test.rs`, `test.rs` | Unit tests colocated by concern, listed via `#[path = "..."]` or `mod ..._test;`. |
+| `*_tests.rs` | Unit tests colocated by concern, wired in with `#[path = "..."]`. (`injected_test.rs` and `test.rs` are also in this directory but no module declares them, so they are not compiled.) |
 
 ## Operational constraints
 

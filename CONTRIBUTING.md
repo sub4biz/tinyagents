@@ -69,7 +69,7 @@ TinyAgents should make agent systems explicit and inspectable. Prefer:
 - examples that show concrete agent behavior rather than abstract promises
 
 New module directories should keep shared type definitions in `types.rs` and
-module-local unit tests in `test.rs`. Integration tests belong in `tests/`.
+module-local unit tests in a sibling `<module>_tests.rs` (`mod_tests.rs` beside a `mod.rs`). Integration tests belong in `tests/`.
 
 ## Pull Request Checklist
 

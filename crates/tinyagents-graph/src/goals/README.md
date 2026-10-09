@@ -124,4 +124,4 @@ let exec = graph.run_with_thread("thread-1", St::default()).await?;
 | `tool.rs` | `GoalTool` / `GoalToolKind` harness tools. |
 | `continuation.rs` | `goal_gate_node`, `run_continuation_tick`, `note_user_turn`. |
 | `budget.rs` | `account_turn`, `GoalBudgetGuard`, `BudgetVerdict` — charging a finished turn and stopping an overrunning one. |
-| `test.rs` | Unit tests (types, store, tools, continuation loop, budget). |
+| `mod_tests.rs` | Unit tests (types, store, tools, continuation loop, budget). |

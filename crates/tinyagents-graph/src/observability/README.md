@@ -72,7 +72,7 @@ stronger than "usually persisted, never run-blocking."
 | `types.rs` | Every public type: `GraphObservation`, journal/status-store traits and in-memory impls, `JournalGraphSink`, latency/health rollups. |
 | `mod.rs` | Behavioral code: rollup computation, journal/store/sink impls. |
 | `langfuse/` | `GraphLangfuseExporter` and its span-construction logic. |
-| `test.rs` | Unit tests (journal round-trips, sink lineage, latency/health rollups). |
+| `mod_tests.rs` | Unit tests (journal round-trips, sink lineage, latency/health rollups). |
 
 ## Operational constraints
 

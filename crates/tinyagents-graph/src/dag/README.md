@@ -36,7 +36,7 @@ anything is compiled or executed.
 | --- | --- |
 | `types.rs` | `DagNode`, `DagIssue`. |
 | `mod.rs` | `has_cycle`, `validate_dag` (Kahn's algorithm, O(V + E)). |
-| `test.rs` | Unit tests (acyclic acceptance, cycles, self-edges, dangling edges, the duplicate-id false-cycle guard). |
+| `mod_tests.rs` | Unit tests (acyclic acceptance, cycles, self-edges, dangling edges, the duplicate-id false-cycle guard). |
 
 ## Semantics worth knowing
 

@@ -33,7 +33,7 @@ under runtime names, and deterministically picking one for a given call.
 | ---------- | ---------------------------------------------------------------------- |
 | `types.rs` | `ModelSelection`, `ModelRegistry`, `ResolvedModelBinding` definitions (plus their `Debug` impls). |
 | `mod.rs`   | `ModelRegistry` methods, the `resolve` selection algorithm, `model_eligible`/`model_satisfies`/`binding` helpers. |
-| `test.rs`  | Unit tests for registration, default handling, and each resolution precedence tier. |
+| `mod_tests.rs` | Unit tests for registration, default handling, and each resolution precedence tier. |
 
 ## Operational constraints
 
