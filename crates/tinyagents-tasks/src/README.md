@@ -196,7 +196,7 @@ reference (`From<&DetachedSubagentStatus>`, and `TryFrom<&_>` for `CompletionSta
 | `SubagentOutcomeKind` (orchestration) | `From<&_>`: `AwaitingInput` -> `Awaiting`; `Incomplete` + `Timeout` -> `TimedOut`, other `Incomplete` -> `Failed` | none (payload) |
 | `AgentRunStatus` (session) | `From`: `AwaitingUser`, `Paused` -> `Awaiting`; `Interrupted` -> `Abandoned` | `From`: `CancelRequested` -> `Running`; `TimedOut` -> `Failed`; `Abandoned` -> `Interrupted`; `Awaiting` -> `AwaitingUser` |
 | `TranscriptSubagentStatus` (session) | `From`: `Incomplete` -> `Failed`; `Interrupted` -> `Abandoned` | `TryFrom`: live states -> `Running`; `TimedOut` -> `Incomplete`; `Abandoned` -> `Interrupted`; `Cancelled` -> error |
-| `CompletionStatus` (tasks) | `From`: `Success` -> `Completed`; `Incomplete` -> `Failed` | `TryFrom`: `Completed` -> `Success`, `Failed` -> `Failed`, `Cancelled` -> `Cancelled`, `TimedOut`, `Abandoned` -> `Incomplete`; live states (`Pending`, `Running`, `Awaiting`, `CancelRequested`) -> error |
+| `CompletionStatus` (tasks) | `From`: `Success` -> `Completed`, `Failed` -> `Failed`, `Cancelled` -> `Cancelled`, `Incomplete` -> `Failed` | `TryFrom`: `Completed` -> `Success`, `Failed` -> `Failed`, `Cancelled` -> `Cancelled`, `TimedOut`, `Abandoned` -> `Incomplete`; live states (`Pending`, `Running`, `Awaiting`, `CancelRequested`) -> error |
 
 The other pairs convert directly where both sides have a meaningful value:
 `SubAgentJobStatus` <-> `AgentRunStatus` (`From` out, `TryFrom` back; `Incomplete`
