@@ -497,6 +497,28 @@ async fn a_cancel_before_the_child_launches_is_recorded_once_it_has_a_notify_mod
     assert_eq!(pending[0].status, CompletionStatus::Cancelled);
 }
 
+/// An executor that returns `SubagentError::Cancelled` is converted to a
+/// cancelled outcome before persistence, so it is recorded as `Cancelled` and
+/// the call returns `Ok`.
+#[tokio::test]
+async fn an_executor_cancelled_error_is_recorded_as_cancelled() {
+    let router = router();
+    let behaviour: Behaviour = Arc::new(|_| Err(SubagentError::Cancelled));
+    let driver =
+        driver(Some(NotifyMode::Off), Some("p"), behaviour).with_completion_router(router.clone());
+    let result = driver
+        .run(request("t1"), CancellationToken::new())
+        .await
+        .unwrap();
+    assert!(matches!(
+        result.outcome.status,
+        SubagentOutcomeKind::Cancelled
+    ));
+    let pending = router.pending_for("p");
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].status, CompletionStatus::Cancelled);
+}
+
 #[tokio::test]
 async fn a_cancelled_child_without_a_router_is_unchanged() {
     let token = CancellationToken::new();

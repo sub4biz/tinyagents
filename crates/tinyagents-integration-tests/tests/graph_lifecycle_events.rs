@@ -481,7 +481,8 @@ async fn an_interrupt_after_the_tool_batch_retracts_instead_of_closing_the_turn(
         "a turn holding discarded tool results must not be reported complete: {events:?}"
     );
     assert!(
-        !events.iter().any(|e| e.starts_with("append:2:tool")) || recorder.kinds().contains(&"message.retracted".to_string()),
+        !events.iter().any(|e| e.starts_with("append:2:tool"))
+            || recorder.kinds().contains(&"message.retracted".to_string()),
         "{events:?}"
     );
 }

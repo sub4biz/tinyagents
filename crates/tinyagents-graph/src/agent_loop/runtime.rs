@@ -521,7 +521,7 @@ where
     // arbitrary default.
     if let Some(control) = ctx.take_control() {
         let result = apply_control(ctx, &mut loop_state, control, node::MODEL, route);
-        retract_on_interrupt(harness, ctx, &result, entry_len);
+        retract_on_interrupt(harness, ctx, &result, &loop_state.messages, entry_len);
         return result;
     }
     // Stash the response for `settle` to extract structured output from.
@@ -609,7 +609,7 @@ where
 
     if let Some(control) = ctx.take_control() {
         let result = apply_control(ctx, &mut loop_state, control, node::TOOLS, node::PLAN);
-        if !retract_on_interrupt(harness, ctx, &result, entry_len) {
+        if !retract_on_interrupt(harness, ctx, &result, &loop_state.messages, entry_len) {
             // Every tool result of this batch is on the transcript: announce
             // them and close the turn, as the direct loop does after its batch.
             phases::lifecycle_close_turn(harness, ctx, &loop_state.messages);
@@ -632,6 +632,7 @@ fn retract_on_interrupt<State: Send + Sync, Ctx: Send + Sync>(
     harness: &AgentHarness<State, Ctx>,
     ctx: &mut RunContext<Ctx>,
     result: &Result<NodeResult<LoopState>>,
+    messages: &[tinyinference_llm::message::Message],
     entry_len: usize,
 ) -> bool {
     if !matches!(result, Ok(NodeResult::Interrupt(_))) {
@@ -646,7 +647,7 @@ fn retract_on_interrupt<State: Send + Sync, Ctx: Send + Sync>(
     phases::lifecycle_retract(ctx, entry_len);
     // Close the turn the node opened: a fresh runtime resuming from the
     // checkpoint cannot carry this tracker's open turn over.
-    phases::lifecycle_close_turn(harness, ctx, &[]);
+    phases::lifecycle_close_turn(harness, ctx, &messages[..entry_len.min(messages.len())]);
     true
 }
 
