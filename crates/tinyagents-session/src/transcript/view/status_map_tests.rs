@@ -38,7 +38,10 @@ fn transcript_to_task_covers_every_variant() {
     assert_eq!(expected.len(), ALL.len());
     for (status, task) in expected {
         assert_eq!(Task::from(status), task, "{status:?}");
-        assert_eq!(Task::from(status).is_terminal(), status != TranscriptSubagentStatus::Running);
+        assert_eq!(
+            Task::from(status).is_terminal(),
+            status != TranscriptSubagentStatus::Running
+        );
     }
 }
 

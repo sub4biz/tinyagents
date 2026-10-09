@@ -32,7 +32,10 @@ pub fn task_status_to_run_status(status: OrchestrationTaskStatus) -> AgentRunSta
 ///
 /// Lossy (many-to-one): `AwaitingUser` and `Paused` -> `Awaiting`,
 /// `Interrupted` -> `Abandoned`.
-#[deprecated(since = "2.1.4", note = "use `OrchestrationTaskStatus::from(run_status)`")]
+#[deprecated(
+    since = "2.1.4",
+    note = "use `OrchestrationTaskStatus::from(run_status)`"
+)]
 pub fn run_status_to_task_status(status: AgentRunStatus) -> OrchestrationTaskStatus {
     OrchestrationTaskStatus::from(status)
 }

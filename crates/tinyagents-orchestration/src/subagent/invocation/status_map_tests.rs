@@ -216,7 +216,12 @@ fn job_and_completion_status_convert_exhaustively() {
         assert_eq!(done.is_none(), !job.is_terminal(), "{job:?}");
     }
     // The reverse is total and lossless.
-    for done in [Done::Success, Done::Failed, Done::Cancelled, Done::Incomplete] {
+    for done in [
+        Done::Success,
+        Done::Failed,
+        Done::Cancelled,
+        Done::Incomplete,
+    ] {
         assert_eq!(Done::try_from(Job::from(done)).unwrap(), done);
     }
 }

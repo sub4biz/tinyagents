@@ -69,7 +69,10 @@ impl TryFrom<AgentRunStatus> for SubAgentJobStatus {
             AgentRunStatus::Failed => Ok(Self::Failed),
             AgentRunStatus::Cancelled => Ok(Self::Cancelled),
             AgentRunStatus::AwaitingUser | AgentRunStatus::Paused | AgentRunStatus::Interrupted => {
-                Err(NoEquivalentStatus::new(status.as_str(), "SubAgentJobStatus"))
+                Err(NoEquivalentStatus::new(
+                    status.as_str(),
+                    "SubAgentJobStatus",
+                ))
             }
         }
     }
@@ -99,9 +102,7 @@ impl TryFrom<SubAgentJobStatus> for CompletionStatus {
             SubAgentJobStatus::Failed => Ok(Self::Failed),
             SubAgentJobStatus::Incomplete => Ok(Self::Incomplete),
             SubAgentJobStatus::Cancelled => Ok(Self::Cancelled),
-            SubAgentJobStatus::Queued => {
-                Err(NoEquivalentStatus::new("queued", "CompletionStatus"))
-            }
+            SubAgentJobStatus::Queued => Err(NoEquivalentStatus::new("queued", "CompletionStatus")),
             SubAgentJobStatus::Running => {
                 Err(NoEquivalentStatus::new("running", "CompletionStatus"))
             }

@@ -1,5 +1,7 @@
 use super::*;
-use crate::subagent::{SubagentIncomplete, SubagentPause, SubagentResume, SubAgentJobStatus as Job};
+use crate::subagent::{
+    SubAgentJobStatus as Job, SubagentIncomplete, SubagentPause, SubagentResume,
+};
 use tinyagents_session::run_ledger::AgentRunStatus as Run;
 use tinyagents_tasks::{CompletionStatus as Done, OrchestrationTaskStatus as Task};
 
@@ -49,7 +51,10 @@ fn outcome_to_job_covers_every_variant() {
         (SubagentOutcomeKind::Completed, Some(Job::Completed)),
         (paused(), None),
         (incomplete(IncompleteKind::Timeout), Some(Job::Incomplete)),
-        (incomplete(IncompleteKind::Unspecified), Some(Job::Incomplete)),
+        (
+            incomplete(IncompleteKind::Unspecified),
+            Some(Job::Incomplete),
+        ),
         (SubagentOutcomeKind::Cancelled, Some(Job::Cancelled)),
     ];
     for (outcome, job) in expected {
@@ -83,4 +88,27 @@ fn terminal_outcomes_map_to_terminal_tasks() {
         assert!(Task::from(&outcome).is_terminal(), "{outcome:?}");
     }
     assert!(Task::from(&paused()).is_live());
+}
+
+#[test]
+fn outcome_kind_golden_json_in_and_out() {
+    // Records persisted before `kind` existed carry only a reason.
+    let old = serde_json::json!({"Incomplete": {"reason": "stopped"}});
+    let outcome: SubagentOutcomeKind = serde_json::from_value(old).unwrap();
+    assert_eq!(outcome, incomplete(IncompleteKind::Unspecified).tap_reason("stopped"));
+    assert_eq!(Task::from(&outcome), Task::Failed);
+    assert_eq!(
+        serde_json::to_value(&outcome).unwrap(),
+        serde_json::json!({"Incomplete": {"reason": "stopped", "kind": "unspecified"}})
+    );
+}
+
+trait TapReason {
+    fn tap_reason(self, reason: &str) -> Self;
+}
+
+impl TapReason for SubagentOutcomeKind {
+    fn tap_reason(self, _reason: &str) -> Self {
+        self
+    }
 }

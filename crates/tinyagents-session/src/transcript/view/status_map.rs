@@ -13,9 +13,7 @@ impl From<TranscriptSubagentStatus> for OrchestrationTaskStatus {
     fn from(status: TranscriptSubagentStatus) -> Self {
         match status {
             TranscriptSubagentStatus::Completed => Self::Completed,
-            TranscriptSubagentStatus::Failed | TranscriptSubagentStatus::Incomplete => {
-                Self::Failed
-            }
+            TranscriptSubagentStatus::Failed | TranscriptSubagentStatus::Incomplete => Self::Failed,
             TranscriptSubagentStatus::Interrupted => Self::Abandoned,
             TranscriptSubagentStatus::Running => Self::Running,
         }

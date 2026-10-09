@@ -64,10 +64,19 @@ fn completion_status_golden_wire_round_trips() {
 #[test]
 fn completion_to_task_is_total() {
     let expected = [
-        (CompletionStatus::Success, OrchestrationTaskStatus::Completed),
+        (
+            CompletionStatus::Success,
+            OrchestrationTaskStatus::Completed,
+        ),
         (CompletionStatus::Failed, OrchestrationTaskStatus::Failed),
-        (CompletionStatus::Cancelled, OrchestrationTaskStatus::Cancelled),
-        (CompletionStatus::Incomplete, OrchestrationTaskStatus::Failed),
+        (
+            CompletionStatus::Cancelled,
+            OrchestrationTaskStatus::Cancelled,
+        ),
+        (
+            CompletionStatus::Incomplete,
+            OrchestrationTaskStatus::Failed,
+        ),
     ];
     assert_eq!(expected.len(), ALL_COMPLETIONS.len());
     for (completion, task) in expected {
