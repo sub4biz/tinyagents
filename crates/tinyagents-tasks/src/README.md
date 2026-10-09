@@ -156,9 +156,12 @@ hand-off and nothing product-specific:
   `QueueLane::Followup` when the parent is attached, `Collect` onto
   `QueueLane::Collect`, `HoldForNextTurn` waits for `begin_turn`, `Off` is
   record-only for `pull`. A `Followup`/`Collect` record whose parent is not
-  attached stays pending for `claim_pending`. Pushing onto a live queue is the
-  delivery (the record settles `Delivered`); durability covers everything that
-  is not handed to a live queue, including a restart.
+  attached stays pending for `claim_pending`. A push onto a live queue counts
+  as attempt one and leases the record; it settles only when the host calls
+  `mark_delivered`, so a crash, a cleared queue or `detach_parent` (which
+  releases that parent's leases) leaves it claimable. Delivery is at-least-once.
+  `in_flight_for` lists unacknowledged pushes and `release(ids)` frees an
+  abandoned claim without counting a failure.
 - `CompletionFormatter` — the wording. `NeutralCompletionFormatter` is the
   default (escaped JSON in a `<completed_child_tasks>` block); a host supplies
   its own with `CompletionRouter::with_formatter`.

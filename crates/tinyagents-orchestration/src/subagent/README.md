@@ -144,16 +144,21 @@ wildcard arm. There is no CHANGELOG in this repository.
 
 `SubagentDriver::with_completion_router(Arc<CompletionRouter>)` makes the driver
 record each child it finishes with a `tinyagents_tasks::CompletionRouter`, so the
-parent is told according to the child's `NotifyMode`
-(`PreparedSubagent::with_notify_mode`, default `Followup`). The parent key is
-`PreparedSubagent::with_completion_parent`, else the request's thread id, else
-the parent run id. Only the invocation that wins the durable terminal write
-records, so coalesced followers and replayed terminals add nothing. Recorded:
-`Completed` (success), `Incomplete`, and an executor error after launch
-(failed). Not recorded: a cancellation (the parent's own doing) and a pause (the
-same task id completes later). A router failure is logged, never raised. With no
-router configured the driver is unchanged. Detached children tracked by a status
-channel use `spawn_status_watcher_with_completions` (see `detached/README.md`).
+parent is told according to the child's `NotifyMode`. Recording is per spawn:
+`PreparedSubagent::with_notify_mode(mode)` opts a child in (a detached spawn
+passes `NotifyMode::default()`, follow-up); a child with no notify mode, such as
+a foreground one whose result already returns to the parent, is never recorded.
+The parent key is `PreparedSubagent::with_completion_parent`, else the request's
+thread id, else the parent run id. Only the invocation that wins the durable
+terminal write records, so coalesced followers and replayed terminals add
+nothing. Recorded: `Completed` (success) and `Incomplete`. Not recorded: a
+cancellation (the parent's own doing), a pause (the same task id completes
+later), and an executor error (nothing terminal was persisted and the task may be
+re-run; `run` returns the error, and a host that wants a failed push records it
+itself). A router failure is logged, never raised. With no router configured the
+driver is unchanged. Detached children tracked by a status channel use
+`spawn_status_watcher_with_completions` (see `detached/README.md`), which keeps
+watching across a pause and skips a child whose ledger shows a cancellation.
 
 ## Policy, result and role (D5/D6/D9)
 

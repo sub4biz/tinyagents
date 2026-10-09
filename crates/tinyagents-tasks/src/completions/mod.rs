@@ -1,7 +1,7 @@
 //! Durable push-completion for detached children.
 //!
 //! A detached child runs on its own and finishes whenever it finishes. The
-//! parent still has to hear about it, exactly once, even if the parent is idle,
+//! parent still has to hear about it, once, even if the parent is idle,
 //! mid-turn, or the process restarts in between. This module owns that
 //! hand-off:
 //!
@@ -17,7 +17,8 @@
 //!
 //! What stays with the host: when a parent is idle enough to receive a
 //! delivery turn, the turn itself, and what to do with a record that gave up.
-//! Nothing here relaunches a child.
+//! Live pushes are at-least-once: the host acknowledges with
+//! `mark_delivered`. Nothing here relaunches a child.
 
 mod format;
 mod router;
