@@ -6,7 +6,7 @@ use super::*;
 use std::collections::HashSet;
 
 use serde_json::json;
-use tinytools::{ApprovalDirective, RuleContext, Surface, ToolRules};
+use tinytools::{ApprovalDirective, RuleContext, Surface, Tool, ToolRules};
 
 fn deny(pattern: &str) -> ToolRules {
     ToolRules::from_allow_deny(Vec::<String>::new(), [pattern])
