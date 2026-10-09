@@ -39,14 +39,12 @@ pub(super) async fn run_child_step<E: WorkflowExecutor + 'static>(
         request.agent_id
     );
     let work_request = request.clone();
-    // The executor's own token is the lifecycle token: cancelling the run
-    // reaches the child, and the driver derives the child's from it.
-    let lifecycle = cancel.clone();
+    // `cancel` is the lifecycle token: cancelling the run reaches the child,
+    // whose own token the driver derives from it.
     let result = run_agent_step(config, identity, cancel, move |token| {
         let executor = executor.clone();
         let request = work_request.clone();
         let registration = registration.clone();
-        let _ = &lifecycle;
         async move {
             let result = executor
                 .execute(request, token, registration)
@@ -83,7 +81,6 @@ pub(super) async fn run_child_step<E: WorkflowExecutor + 'static>(
                 "workflow child paused for input".to_owned(),
             )),
         },
-        Err(AgentStepError::Worker(error)) => Err(OrchestrationError(error.to_string())),
         Err(error) => Err(OrchestrationError(error.to_string())),
     }
 }
