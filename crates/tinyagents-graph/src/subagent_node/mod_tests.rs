@@ -1,4 +1,6 @@
 //! Tests for host-driven graph-to-agent delegation.
+// The deprecated `SubAgentNode` keeps its behaviour and its coverage.
+#![allow(deprecated)]
 
 use std::sync::{Arc, Mutex};
 

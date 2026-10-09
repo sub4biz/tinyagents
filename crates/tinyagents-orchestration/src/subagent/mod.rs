@@ -21,6 +21,7 @@ mod planner;
 mod policy;
 mod result_policy;
 mod role;
+mod step;
 mod types;
 
 pub use admission::{SpawnAdmission, SpawnPolicy, SpawnRejection, SpawnReservation};
@@ -52,6 +53,10 @@ pub use result_policy::{
 pub use role::{
     SUBAGENT_JOBS_TOOL, SUBAGENT_MESSAGE_TOOL, SubagentRole, is_delegation_tool, restrict_tools,
     subagent_framing,
+};
+pub use step::{
+    AgentStepConfig, AgentStepError, AgentStepIdentity, AgentStepResult, StepContext, StepSuccess,
+    StepWorkError, run_agent_step,
 };
 #[allow(deprecated)]
 pub use types::SubagentStatus;

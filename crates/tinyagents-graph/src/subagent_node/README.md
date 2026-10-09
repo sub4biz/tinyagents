@@ -1,5 +1,10 @@
 # graph::subagent_node
 
+> **Deprecated.** `SubAgentNode` and `subagent_node` are marked
+> `#[deprecated(note = "use tinyagents_orchestration SubagentDriver")]`. Graph
+> cannot depend on orchestration, so the node cannot adapt the driver; its
+> behaviour is unchanged. Use `SubagentDriver` for new work.
+
 Sub-agent nodes — the graph node that delegates to a harness *agent* (a
 model-driven agent loop) invoked through an explicit host capability.
 

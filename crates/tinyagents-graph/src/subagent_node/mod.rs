@@ -19,6 +19,10 @@
 //!   onto the parent execution rollup, and forwards the child run's harness
 //!   events onto the host-provided event sink.
 //!
+//! **Deprecated** (see [`SubAgentNode`]): use `tinyagents_orchestration`'s
+//! `SubagentDriver`. The graph crate cannot depend on orchestration, so the
+//! node keeps its own behaviour rather than adapting the driver.
+//!
 //! See `types` for the data definitions and `test.rs` for focused tests.
 
 mod types;
@@ -43,6 +47,7 @@ type Handler<S, U> = Box<
         + Sync,
 >;
 
+#[allow(deprecated)]
 impl<State, Update> SubAgentNode<State, Update> {
     /// Builds a sub-agent node delegating to the registered agent named `agent`,
     /// with the given parent↔child mappers and a default [`SubAgentPolicy`].
@@ -91,6 +96,8 @@ impl<State, Update> SubAgentNode<State, Update> {
 /// 5. records the child run — with its rolled-up [`UsageTotals`](tinyinference_llm::usage::UsageTotals) — onto the
 ///    enclosing run's child-run sink, and
 /// 6. folds the [`SubAgentOutput`] into a parent `Update` via the output mapper.
+#[deprecated(note = "use tinyagents_orchestration SubagentDriver")]
+#[allow(deprecated)]
 pub fn subagent_node<State, Update>(node: SubAgentNode<State, Update>) -> Handler<State, Update>
 where
     State: Clone + Send + Sync + 'static,

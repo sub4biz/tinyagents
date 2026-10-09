@@ -20,7 +20,7 @@ use tinyagents_session::run_ledger::{
 use super::state::set_phase_status;
 use super::*;
 
-fn definition() -> WorkflowDefinition {
+pub(super) fn definition() -> WorkflowDefinition {
     WorkflowDefinition {
         id: "test".into(),
         name: "Test".into(),
@@ -52,7 +52,7 @@ fn definition() -> WorkflowDefinition {
 }
 
 #[derive(Default)]
-struct MemoryStore(Mutex<HashMap<String, WorkflowRun>>);
+pub(super) struct MemoryStore(Mutex<HashMap<String, WorkflowRun>>);
 
 impl WorkflowStore for MemoryStore {
     fn load(&self, id: &str) -> Result<Option<WorkflowRun>, OrchestrationError> {
@@ -222,8 +222,8 @@ impl WorkflowStore for RenewFailStore {
 }
 
 #[derive(Default)]
-struct FakeExecutor {
-    calls: Mutex<Vec<WorkflowChildRequest>>,
+pub(super) struct FakeExecutor {
+    pub(super) calls: Mutex<Vec<WorkflowChildRequest>>,
     active: AtomicUsize,
     peak: AtomicUsize,
     fail_agent: Mutex<Option<String>>,
@@ -231,9 +231,9 @@ struct FakeExecutor {
 }
 
 #[derive(Default)]
-struct BlockingExecutor {
+pub(super) struct BlockingExecutor {
     started: tokio::sync::Notify,
-    cancelled: Mutex<Vec<String>>,
+    pub(super) cancelled: Mutex<Vec<String>>,
     calls: AtomicUsize,
 }
 

@@ -21,6 +21,20 @@ completions, and inter-member messages.
   cyclic task dependencies, etc.
 - **`run_member_graph`** — executes a member's work as a generic DAG (execute →
   complete/fail → done), bridging host worker callbacks and the graph layer.
+  The `execute` step runs the worker through `SubagentDriver`
+  (`subagent::run_agent_step`) under an inert default policy, so existing
+  callers behave exactly as before.
+- **`run_member_graph_with` / `MemberStep`** — the same graph with explicit
+  driver policy (`AgentStepConfig`: `SpawnPolicy` admission scoped to the team
+  id with the member id as target, `SubAgentPolicy::timeout`, `ResultPolicy`).
+  Retry, token budget and role need worker-reported transient failures / usage /
+  a tool surface that `MemberOutcome` does not carry, so they do not take
+  effect through this adapter (use `subagent::run_agent_step` directly).
+  `MemberStep::with_cancellation` ties a step to the run's token (a pre-cancelled member never runs and goes to `on_failed`). `MemberStep::default()` shares one scope and has no target: give a limited
+  config a real `MemberStep::new(config, team, member)`.
+  A completed run goes to `on_complete` with the policy-trimmed output; a
+  spawn rejection, timeout, exceeded budget or worker-reported failure goes to
+  `on_failed` with the reason; a worker `Err` still fails the graph run.
 
 ## Design and invariants
 

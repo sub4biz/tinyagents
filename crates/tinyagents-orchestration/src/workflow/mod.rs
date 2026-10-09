@@ -5,6 +5,7 @@
 //! [`WorkflowStore`] and [`WorkflowExecutor`]; therefore this module has no
 //! knowledge of credentials, model selection, policy, progress, or RPC.
 
+mod child_step;
 mod engine;
 mod graph;
 mod state;
