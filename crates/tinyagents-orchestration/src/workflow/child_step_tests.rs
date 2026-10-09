@@ -141,3 +141,15 @@ async fn schema_failure_is_recorded_in_phase_metadata() {
     let meta = &states["plan"]["outputs"][0]["metadata"];
     assert!(meta["resultPolicy"]["schemaError"].is_string(), "{meta}");
 }
+
+#[tokio::test]
+async fn string_output_validates_against_a_string_schema() {
+    let (store, _executor, engine) = run_with(
+        AgentStepConfig::default()
+            .with_result_policy(ResultPolicy::new().with_schema(json!({"type": "string"}))),
+    );
+    let states = drive(&engine, &store).await;
+    let out = &states["plan"]["outputs"][0];
+    assert!(out["metadata"].get("resultPolicy").is_none(), "{out}");
+    assert_eq!(out["output"], json!("plan output"));
+}

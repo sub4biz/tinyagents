@@ -171,3 +171,17 @@ async fn pre_cancelled_step_reports_cancelled_without_running() {
     assert!(matches!(err, AgentStepError::Cancelled));
     assert_eq!(ran.load(Ordering::SeqCst), 0, "the worker never ran");
 }
+
+#[tokio::test]
+async fn worker_receives_the_configured_role() {
+    let config = AgentStepConfig::default().with_role(SubagentRole::Leaf);
+    let result = run_agent_step(
+        &config,
+        ident("a"),
+        CancellationToken::new(),
+        |ctx| async move { Ok(StepSuccess::new(format!("{:?}", ctx.role), ())) },
+    )
+    .await
+    .unwrap();
+    assert_eq!(result.outcome.output, "Leaf");
+}

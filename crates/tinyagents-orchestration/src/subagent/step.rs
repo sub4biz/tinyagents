@@ -48,7 +48,8 @@ pub struct AgentStepConfig {
     pub policy: SubAgentPolicy,
     /// Output trimming / schema check (D5). Default: inactive.
     pub result_policy: ResultPolicy,
-    /// Delegation role (D9). Default: orchestrator.
+    /// Delegation role (D9). Default: orchestrator. Passed to the worker in
+    /// [`StepContext::role`]; the worker enforces it.
     pub role: SubagentRole,
 }
 
@@ -209,9 +210,23 @@ pub struct AgentStepResult<T> {
     pub value: Option<T>,
 }
 
+/// What the driver hands the worker for one attempt.
+///
+/// The crate cannot see the tools an opaque worker holds, so
+/// [`AgentStepConfig::role`] cannot filter them itself: a worker that can
+/// delegate must honour [`Self::role`] (drop its delegation tools when it is
+/// [`SubagentRole::Leaf`]).
+#[derive(Clone, Debug)]
+pub struct StepContext {
+    /// Child token: cancelled on lifecycle cancellation or policy timeout.
+    pub cancellation: CancellationToken,
+    /// The configured delegation role the worker must enforce.
+    pub role: SubagentRole,
+}
+
 type Work<T> = Arc<
     dyn Fn(
-            CancellationToken,
+            StepContext,
         ) -> Pin<Box<dyn Future<Output = Result<StepSuccess<T>, StepWorkError>> + Send>>
         + Send
         + Sync,
@@ -267,7 +282,11 @@ impl<T: Send + 'static> SubagentExecutor<()> for StepExecutor<T> {
         execution: SubagentExecution<()>,
     ) -> Result<SubagentOutcome, SubagentError> {
         let task_id = execution.prepared.task_id.clone();
-        let result = (self.work)(execution.cancellation.clone()).await;
+        let result = (self.work)(StepContext {
+            cancellation: execution.cancellation.clone(),
+            role: execution.prepared.role,
+        })
+        .await;
         let mut slot = self.slot.lock().expect("agent-step slot poisoned");
         match result {
             Ok(success) => {
@@ -346,8 +365,8 @@ impl SubagentPersistence for StepPersistence {
 /// Runs `work` as one subagent lifecycle on a [`SubagentDriver`] configured
 /// from `config`.
 ///
-/// `work` receives the child cancellation token (cancelled on lifecycle
-/// cancellation or policy timeout) and may be invoked more than once when the
+/// `work` receives a [`StepContext`] (the child cancellation token, cancelled on
+/// lifecycle cancellation or policy timeout, and the role it must enforce) and may be invoked more than once when the
 /// retry policy retries a [`StepWorkError::Transient`] failure.
 pub async fn run_agent_step<T, F, Fut>(
     config: &AgentStepConfig,
@@ -357,7 +376,7 @@ pub async fn run_agent_step<T, F, Fut>(
 ) -> Result<AgentStepResult<T>, AgentStepError>
 where
     T: Send + 'static,
-    F: Fn(CancellationToken) -> Fut + Send + Sync + 'static,
+    F: Fn(StepContext) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<StepSuccess<T>, StepWorkError>> + Send + 'static,
 {
     let target = identity

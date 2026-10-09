@@ -176,7 +176,7 @@ where
         &step.config,
         step.identity.clone(),
         CancellationToken::new(),
-        move |_token| {
+        move |_ctx| {
             let fut = run_worker();
             async move {
                 Ok(match fut.await? {

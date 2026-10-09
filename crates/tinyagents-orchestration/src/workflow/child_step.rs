@@ -53,6 +53,7 @@ pub(super) async fn run_child_step<E: WorkflowExecutor + 'static>(
         request.agent_id
     );
     let work_request = request.clone();
+    let schema_checked = config.result_policy.schema.is_some();
     let registration = Arc::new(RecordingRegistration {
         inner: registration,
         ids: parking_lot::Mutex::new(Vec::new()),
@@ -61,16 +62,16 @@ pub(super) async fn run_child_step<E: WorkflowExecutor + 'static>(
     let cancel_executor = executor.clone();
     // `cancel` is the lifecycle token: cancelling the run reaches the child,
     // whose own token the driver derives from it.
-    let result = run_agent_step(config, identity, cancel, move |token| {
+    let result = run_agent_step(config, identity, cancel, move |ctx| {
         let executor = executor.clone();
         let request = work_request.clone();
         let registration: Arc<dyn WorkflowChildRegistration> = registration.clone();
         async move {
             let result = executor
-                .execute(request, token, registration)
+                .execute(request, ctx.cancellation, registration)
                 .await
                 .map_err(|error| anyhow::anyhow!(error.0))?;
-            let rendered = render_compat_output(&result.output);
+            let rendered = step_text(&result.output, schema_checked);
             Ok(StepSuccess::new(rendered, result))
         }
     })
@@ -83,7 +84,7 @@ pub(super) async fn run_child_step<E: WorkflowExecutor + 'static>(
                 })?;
                 // Keep the executor's structured output unless the result
                 // policy actually changed the text.
-                if step.outcome.output != render_compat_output(&child.output) {
+                if step.outcome.output != step_text(&child.output, schema_checked) {
                     child.output = Value::String(step.outcome.output.clone());
                 }
                 Ok((child, result_policy_annotations(&step.outcome)))
@@ -124,6 +125,17 @@ pub(super) async fn run_child_step<E: WorkflowExecutor + 'static>(
             );
             Err(OrchestrationError(error.to_string()))
         }
+    }
+}
+
+/// The text the result policy sees. With a schema configured it is the JSON
+/// serialization, so a string output validates as a JSON string (not as
+/// invalid bare text); otherwise the display form the engine already uses.
+fn step_text(output: &Value, schema_checked: bool) -> String {
+    if schema_checked {
+        serde_json::to_string(output).unwrap_or_else(|_| render_compat_output(output))
+    } else {
+        render_compat_output(output)
     }
 }
 

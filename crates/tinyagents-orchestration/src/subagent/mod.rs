@@ -53,7 +53,7 @@ pub use role::{
     subagent_framing,
 };
 pub use step::{
-    AgentStepConfig, AgentStepError, AgentStepIdentity, AgentStepResult, StepSuccess,
+    AgentStepConfig, AgentStepError, AgentStepIdentity, AgentStepResult, StepContext, StepSuccess,
     StepWorkError, run_agent_step,
 };
 #[allow(deprecated)]
