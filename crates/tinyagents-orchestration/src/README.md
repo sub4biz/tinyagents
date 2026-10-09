@@ -29,49 +29,35 @@ delegation.
 
 ## Status vocabularies
 
-Background agent work is described by several lifecycle enums. They are kept
-separate on purpose (different questions, different wire formats); conversions
-between them are explicit, documented and exhaustively tested.
+`OrchestrationTaskStatus` (crate `tinyagents-tasks`) is the one durable
+lifecycle status for a subagent or task run. The other enums stay because their
+serialized forms are persisted or consumed elsewhere, but each is expressed in
+terms of it through `From` / `TryFrom` impls (`NoEquivalentStatus` is the error
+of the fallible ones). The single mapping table, with the lossy cases, is in the
+`tinyagents-tasks` README. `DetachedSubagentStatus` stays the live type that
+carries a payload (output, question, error).
 
-| Type | Crate | Answers | Variants |
-| --- | --- | --- | --- |
-| `SubAgentJobStatus` | orchestration (`subagent::invocation`) | Where is an asynchronous spawned job? Serialized `snake_case` on `SubAgentJob`. | `Queued`, `Running`, `Completed`, `Failed`, `Incomplete`, `Cancelled` |
-| `DetachedSubagentStatus` | orchestration (`subagent::detached`) | What did a detached run publish to its waiters? Carries payloads (output, question, error). Not serialized. | `Running`, `Completed`, `AwaitingUser`, `Failed` |
-| `OrchestrationTaskStatus` | graph (`orchestration`) | Supervisor view of any managed task (the superset: adds cancellation, deadline and abandonment states). | `Pending`, `Running`, `Awaiting`, `Completed`, `Failed`, `CancelRequested`, `Cancelled`, `TimedOut`, `Abandoned` |
-| `AgentRunStatus` | session (`run_ledger`) | Durable ledger row for a background run, shown in a command center. | `Pending`, `Running`, `AwaitingUser`, `Paused`, `Completed`, `Failed`, `Cancelled`, `Interrupted` |
-| `SubagentOutcomeKind` | orchestration (`subagent`) | What a driver-level run *returned*: the outcome plus its payload (pause state, incomplete reason). Formerly `SubagentStatus`. | `Completed`, `AwaitingInput`, `Incomplete`, `Cancelled` |
-| `TranscriptSubagentStatus` | session (`transcript::view`) | Display projection of a sub-agent run read back from a persisted transcript. Formerly `SubagentStatus`. | `Completed`, `Failed`, `Incomplete`, `Interrupted`, `Running` |
+| Type | Crate | Role |
+| --- | --- | --- |
+| `OrchestrationTaskStatus` | tasks | Canonical durable status. |
+| `DetachedSubagentStatus` | orchestration (`subagent::detached`) | Live status published to waiters, with payload. Not serialized. |
+| `SubAgentJobStatus` | orchestration (`subagent::invocation`) | Status on `SubAgentJob` snapshots. |
+| `SubagentOutcomeKind` | orchestration (`subagent`) | What a driver-level run returned, with its pause/incomplete payload. |
+| `AgentRunStatus` | session (`run_ledger`) | Durable ledger row status. |
+| `TranscriptSubagentStatus` | session (`transcript::view`) | Display projection read back from a transcript. |
+| `CompletionStatus` | tasks (`completions`) | How a finished child ended, for the completion router. |
 
 The old `SubagentStatus` names remain as `#[deprecated]` type aliases at their
-original paths; the wire formats did not change.
+original paths. `status::task_status_to_run_status` and
+`status::run_status_to_task_status` are `#[deprecated]` in favour of
+`AgentRunStatus::from` / `OrchestrationTaskStatus::from`. No wire format
+changed; golden serde tests pin each one.
 
-`SubagentOutcomeKind` and `TranscriptSubagentStatus` are not lifecycle states
-of a job and have no conversions: the first is a result value, the second a
-read-only projection of recorded text.
-
-### Conversions
-
-`graph` and `session` do not depend on each other, so the task <-> run-ledger
-mapping lives in this crate (`status`), the first one that sees both. The job
-and detached mappings sit beside their types. Fallible conversions return
-`status::NoEquivalentStatus`.
-
-| From | To | API | Lossy cases |
-| --- | --- | --- | --- |
-| `SubAgentJobStatus` | `OrchestrationTaskStatus` | `to_task_status()` | `Incomplete` -> `Failed` |
-| `SubAgentJob` | `OrchestrationTaskStatus` | `task_status()` | `Incomplete` + `Timeout` -> `TimedOut`; other incomplete -> `Failed` |
-| `SubAgentJobStatus` | `AgentRunStatus` | `to_run_status()` | `Incomplete` -> `Failed` |
-| `OrchestrationTaskStatus` | `SubAgentJobStatus` | `TryFrom` | `CancelRequested` -> `Running`; `TimedOut` -> `Incomplete`; `Awaiting`, `Abandoned` -> error |
-| `DetachedSubagentStatus` | `OrchestrationTaskStatus` | `to_task_status()` | payload dropped; `AwaitingUser` -> `Awaiting` |
-| `DetachedSubagentStatus` | `AgentRunStatus` | `to_run_status()` | payload dropped; `AwaitingUser` -> `AwaitingUser` |
-| `&DetachedSubagentStatus` | `SubAgentJobStatus` | `TryFrom` | payload dropped; `AwaitingUser` -> error |
-| `OrchestrationTaskStatus` | `AgentRunStatus` | `status::task_status_to_run_status` | `CancelRequested` -> `Running`; `TimedOut` -> `Failed`; `Abandoned` -> `Interrupted`; `Awaiting` -> `AwaitingUser` (caveat: `Awaiting` may mean waiting on a child task rather than on the user) |
-| `AgentRunStatus` | `OrchestrationTaskStatus` | `status::run_status_to_task_status` | `Paused`, `AwaitingUser` -> `Awaiting`; `Interrupted` -> `Abandoned` |
-
-Terminality is preserved by every mapping, with one deliberate exception:
-`DetachedSubagentStatus::is_terminal` treats `AwaitingUser` as terminal (the
-run will not progress by itself), while the task and ledger statuses keep it
-live so a follow-up can resume it.
+Dependency direction decides where an impl lives: ledger and transcript-view
+conversions are in `tinyagents-session`, `CompletionStatus` in
+`tinyagents-tasks`, and the job, detached and outcome ones beside their types
+in this crate. `to_task_status()` / `to_run_status()` on the job and detached
+types are kept as thin wrappers over the `From` impls.
 
 ## Boundaries
 

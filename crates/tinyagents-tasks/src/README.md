@@ -45,8 +45,10 @@ call `orchestration_tools` to build the full set, or call
 
 - `OrchestrationTaskKind` — what a task *is* (subgraph run, sub-agent run,
   ...); `as_str()`.
-- `OrchestrationTaskStatus` — lifecycle state; `is_terminal()` / `is_live()`
-  predicates.
+- `OrchestrationTaskStatus` — the one durable lifecycle status for a subagent
+  or task run; `is_terminal()` / `is_live()` predicates. See
+  [Status mapping](#status-mapping).
+- `NoEquivalentStatus` — the error of every fallible status conversion.
 - `OrchestrationTaskSpec` — the request to spawn a task: kind, lineage
   (thread/node), timeout, input payload, metadata. Built with `new` +
   `with_lineage` / `with_thread` / `with_node` / `with_timeout_ms` /
@@ -178,11 +180,46 @@ idle, the delivery turn, its formatter, and what to do with a `GaveUp` record.
 `spawn_status_watcher_with_completions`; with no router configured its behaviour
 is unchanged.
 
+## Status mapping
+
+`OrchestrationTaskStatus` is canonical. Every other subagent-run status enum
+keeps its own (unchanged) wire format and converts to and from it. `From` is
+total; `TryFrom` fails with `NoEquivalentStatus`. `DetachedSubagentStatus`
+carries a payload (output, question, error), so it only converts out, by
+reference.
+
+| Type (crate) | -> `OrchestrationTaskStatus` | `OrchestrationTaskStatus` -> |
+| --- | --- | --- |
+| `DetachedSubagentStatus` (orchestration) | `From<&_>`: `Running`, `Completed`, `Failed`; `AwaitingUser` -> `Awaiting` | none (no payload to rebuild) |
+| `SubAgentJobStatus` (orchestration) | `From`: `Queued` -> `Pending`; `Incomplete` -> `Failed` (`SubAgentJob::task_status()` refines a timeout to `TimedOut`) | `TryFrom`: `CancelRequested` -> `Running`; `TimedOut` -> `Incomplete`; `Awaiting`, `Abandoned` -> error |
+| `SubagentOutcomeKind` (orchestration) | `From<&_>`: `AwaitingInput` -> `Awaiting`; `Incomplete` + `Timeout` -> `TimedOut`, other `Incomplete` -> `Failed` | none (payload) |
+| `AgentRunStatus` (session) | `From`: `AwaitingUser`, `Paused` -> `Awaiting`; `Interrupted` -> `Abandoned` | `From`: `CancelRequested` -> `Running`; `TimedOut` -> `Failed`; `Abandoned` -> `Interrupted`; `Awaiting` -> `AwaitingUser` |
+| `TranscriptSubagentStatus` (session) | `From`: `Incomplete` -> `Failed`; `Interrupted` -> `Abandoned` | `TryFrom`: live states -> `Running`; `TimedOut` -> `Incomplete`; `Abandoned` -> `Interrupted`; `Cancelled` -> error |
+| `CompletionStatus` (tasks) | `From`: `Success` -> `Completed`; `Incomplete` -> `Failed` | `TryFrom`: `TimedOut`, `Abandoned` -> `Incomplete`; live states -> error |
+
+The other pairs convert directly where both sides have a meaningful value:
+`SubAgentJobStatus` <-> `AgentRunStatus` (`From` out, `TryFrom` back; `Incomplete`
+-> `Failed`; `AwaitingUser`, `Paused`, `Interrupted` -> error), `SubAgentJobStatus`
+<-> `CompletionStatus` (`From` in, `TryFrom` out; `Queued`, `Running` -> error),
+and `DetachedSubagentStatus` / `SubagentOutcomeKind` -> `AgentRunStatus`,
+`SubAgentJobStatus` and `CompletionStatus` (`AwaitingUser` / `AwaitingInput`
+pause states -> error where there is no pause state).
+
+Terminality is preserved by every mapping, except that
+`DetachedSubagentStatus::is_terminal` treats `AwaitingUser` as terminal (the
+run will not progress by itself) while the task status keeps it live so a
+follow-up can resume it. Lossy collapses are the ones named above; each is
+pinned by an exhaustive test. Serde forms (`snake_case` strings, plus the
+externally-tagged `SubagentOutcomeKind`) are unchanged and pinned by golden
+tests; the deprecated aliases and helpers are listed in the orchestration
+README.
+
 ## Files
 
 | File | Role |
 | --- | --- |
 | `lib.rs` | Module declarations and re-exports. |
+| `status.rs` | `NoEquivalentStatus` and the `CompletionStatus` <-> `OrchestrationTaskStatus` conversions. |
 | `types.rs` | Task kind/status/spec/result/record/filter types, `OrchestrationToolKind`, `OrchestrationControlOutcome`, and the `DetachedTaskRegistry` snapshot/error types. |
 | `tool.rs` | `OrchestrationTool`, `SteeringRegistry`, tool constructors and schemas. |
 | `store.rs` | `TaskStore` trait, `InMemoryTaskStore`, `JsonlTaskStore`. |

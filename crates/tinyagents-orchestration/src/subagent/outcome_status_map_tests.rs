@@ -95,20 +95,13 @@ fn outcome_kind_golden_json_in_and_out() {
     // Records persisted before `kind` existed carry only a reason.
     let old = serde_json::json!({"Incomplete": {"reason": "stopped"}});
     let outcome: SubagentOutcomeKind = serde_json::from_value(old).unwrap();
-    assert_eq!(outcome, incomplete(IncompleteKind::Unspecified).tap_reason("stopped"));
+    assert_eq!(
+        outcome,
+        SubagentOutcomeKind::Incomplete(SubagentIncomplete::new("stopped"))
+    );
     assert_eq!(Task::from(&outcome), Task::Failed);
     assert_eq!(
         serde_json::to_value(&outcome).unwrap(),
         serde_json::json!({"Incomplete": {"reason": "stopped", "kind": "unspecified"}})
     );
-}
-
-trait TapReason {
-    fn tap_reason(self, reason: &str) -> Self;
-}
-
-impl TapReason for SubagentOutcomeKind {
-    fn tap_reason(self, _reason: &str) -> Self {
-        self
-    }
 }
