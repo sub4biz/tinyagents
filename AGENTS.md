@@ -12,8 +12,9 @@ capability catalog), `crates/tinyagents-session/` (durable session data),
 task stores and orchestration controls), and
 `crates/tinyagents-orchestration/` (direct and durable subagent invocation,
 tools, sessions, lifecycle logic, and focused tests).
-`crates/tinyagents-tracing/` supplies shared opt-in tracing macros, while
 `crates/tinyagents-integration-tests/` owns cross-crate tests and examples.
+The workspace also has `crates/tinyagents-runtime/`, `crates/tinyagents-definition/`
+and `crates/tinyagents-live/`.
 
 Prefer small, focused modules that do one thing extremely well. New feature
 areas should live in module directories instead of accumulating broad,
@@ -23,11 +24,13 @@ dedicated `types.rs` file and keep module-local unit tests in a sibling
 smallest useful API.
 
 Cargo features are package-local. `tinyagents-harness` exposes `sqlite`,
-`tools`, `multimodal`, `storage-drivers`, and `tracing`; `tinyagents-graph`
+`builtin-tools` (`tools` is a deprecated alias), `multimodal`, `png-optimize`,
+`media`, `claude-code`, `langfuse`, `storage-drivers`, and `tracing`; `tinyagents-graph`
 exposes `sqlite`, `storage-drivers`, and `tracing`; session exposes
 `storage-drivers` and `tracing`; registry exposes `tracing`. The
-`storage-drivers` features put each store on `tinystoragedrivers` ports. Tracing instrumentation is
-compiled out by default.
+`storage-drivers` features put each store on `tinystoragedrivers` ports. Tracing
+instrumentation is always compiled in (via the `tracing` crate); the `tracing`
+features are retained no-ops for downstream feature forwards.
 
 Integration tests are in `crates/tinyagents-integration-tests/tests/`, covering serialization, graph routing,
 registry binding, streaming,
