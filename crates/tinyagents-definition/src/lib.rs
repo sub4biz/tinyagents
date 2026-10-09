@@ -63,6 +63,11 @@ pub struct AgentDefinition {
     /// Canonical tool names this agent may use.
     #[serde(default)]
     pub tools: Vec<String>,
+    /// Pattern rules narrowing which tools this agent may see and call, on
+    /// top of [`Self::tools`]. Evaluated by the harness on the catalogue,
+    /// tool search and every call; see [`tinytools::ToolRules`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_rules: Option<tinytools::ToolRules>,
 }
 
 impl AgentDefinition {
@@ -81,6 +86,7 @@ impl AgentDefinition {
             model: None,
             subagents: Vec::new(),
             tools: Vec::new(),
+            tool_rules: None,
         }
     }
 
@@ -110,6 +116,13 @@ impl AgentDefinition {
         S: Into<String>,
     {
         self.tools = tools.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Sets the pattern rules narrowing this agent's tools.
+    #[must_use]
+    pub fn with_tool_rules(mut self, rules: tinytools::ToolRules) -> Self {
+        self.tool_rules = Some(rules);
         self
     }
 

@@ -856,17 +856,23 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
         mut call: ToolCall,
     ) -> Result<(Arc<dyn crate::tool::ToolDispatch<State, Ctx>>, ToolCall)> {
         let name = call.name.clone();
-        let allowed_tools = self.resolve_tool_allowlist(ctx)?;
-        let is_allowed = allowed_tools
-            .as_ref()
-            .is_none_or(|allowed| allowed.contains(&name));
-        let Some(dispatch) = is_allowed
+        let gate = self.resolve_tool_gate(ctx)?;
+        let Some(dispatch) = gate
+            .allows_name(&name)
             .then(|| self.tools.model_dispatch(&name))
             .flatten()
         else {
             return Err(TinyAgentsError::ToolNotFound(name));
         };
         let tool = dispatch.tool();
+        // Tool rules apply to a nested call exactly as to a model call; a
+        // refusal reads like any other nested-call failure.
+        let rule_approval = match gate.admit_call(tool.as_ref(), &call.arguments) {
+            crate::tool::CallGate::Admit(approval) => approval,
+            crate::tool::CallGate::Refuse(message) => {
+                return Err(TinyAgentsError::ToolFailed(message));
+            }
+        };
 
         // Same ordering rule as `admit_tool_call`: strip host-injected keys,
         // inject the authoritative values, then validate the model-facing
@@ -911,7 +917,12 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
             ))
         })?;
 
-        if crate::tool::is_external_tool(tool.as_ref()) || tool.policy().access.approval_required {
+        let needs_approval = match rule_approval {
+            tinytools::ApprovalDirective::Required => true,
+            tinytools::ApprovalDirective::Waived => false,
+            tinytools::ApprovalDirective::Default => tool.policy().access.approval_required,
+        };
+        if crate::tool::is_external_tool(tool.as_ref()) || needs_approval {
             return Err(approval_error(&name));
         }
 

@@ -13,6 +13,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use super::tool_changes;
 use super::*;
+use crate::tool::ToolGate;
 
 impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
     /// The direct tool schemas: the registry's `Direct` schemas filtered by the
@@ -26,13 +27,19 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
     async fn direct_tool_schemas(
         &self,
         ctx: &RunContext<Ctx>,
-        host_allows: &(dyn Fn(&str) -> bool + Sync),
+        gate: &ToolGate,
     ) -> Result<Vec<ToolSchema>> {
         let mut schemas = self
             .tools
             .schemas()
             .into_iter()
-            .filter(|schema| host_allows(&schema.name))
+            .filter(|schema| {
+                gate.lists(
+                    &schema.name,
+                    self.tools.get(&schema.name).as_deref(),
+                    tinytools::Surface::Catalog,
+                )
+            })
             .collect::<Vec<_>>();
         if let Some(toolset) = &self.toolset {
             let existing: HashSet<&str> =
@@ -42,7 +49,13 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
                 .await?
                 .into_iter()
                 .filter(|tool| tool.exposure() == tinytools::ToolExposure::Direct)
-                .filter(|tool| host_allows(tool.name()))
+                .filter(|tool| {
+                    gate.lists(
+                        tool.name(),
+                        Some(tool.as_ref()),
+                        tinytools::Surface::Catalog,
+                    )
+                })
                 .filter(|tool| !existing.contains(tool.name()))
                 .map(|tool| crate::tool::provider_schema(tool.as_ref()))
                 .collect();
@@ -69,15 +82,15 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
         &self,
         ctx: &RunContext<Ctx>,
         messages: &[Message],
-        host_allows: &(dyn Fn(&str) -> bool + Sync),
+        gate: &ToolGate,
     ) -> Result<ToolSurface> {
-        let mut tool_schemas = self.direct_tool_schemas(ctx, host_allows).await?;
+        let mut tool_schemas = self.direct_tool_schemas(ctx, gate).await?;
         // Captured before the bridge schemas are appended below, so
         // `ToolsAdvertised.direct` reports the actual `Direct`-exposure count.
         let direct_schema_count = tool_schemas.len();
         let direct_tool_schemas = tool_schemas.clone();
         let mut bridge_schemas: Vec<ToolSchema> = Vec::new();
-        let deferred_catalog = self.deferred_catalog(host_allows);
+        let deferred_catalog = self.deferred_catalog(gate);
         // A resumed transcript carries promoted declarations in SystemMessage
         // patches. Only restore names still admitted into this run's catalogue.
         let promoted_schemas: BTreeMap<String, ToolSchema> =
@@ -181,13 +194,13 @@ impl ToolSurface {
         harness: &AgentHarness<State, Ctx>,
         ctx: &RunContext<Ctx>,
         messages: &mut Vec<Message>,
-        host_allows: &(dyn Fn(&str) -> bool + Sync),
+        gate: &ToolGate,
         patch_profile: Option<&tinyinference_llm::model::ModelProfile>,
     ) -> Result<bool> {
         if harness.toolset.is_none() {
             return Ok(false);
         }
-        let live_schemas = harness.direct_tool_schemas(ctx, host_allows).await?;
+        let live_schemas = harness.direct_tool_schemas(ctx, gate).await?;
         let mut rewrote = false;
         if let Some(patch) = tool_changes::diff_tool_set(&self.declared_tool_schemas, &live_schemas)
         {
