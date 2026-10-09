@@ -12,8 +12,8 @@ use std::time::Duration;
 use tokio::sync::watch;
 use tokio::task::AbortHandle;
 
-use tinyagents_harness::error::{Result, TinyAgentsError};
 use tinyagents_harness::cancel::CancellationToken;
+use tinyagents_harness::error::{Result, TinyAgentsError};
 use tinyagents_harness::ids::TaskId;
 use tinyagents_harness::steering::{RecentRequestIds, SteeringHandle};
 

@@ -1,9 +1,7 @@
 use std::time::Duration;
 
-use tinyagents_tasks::{
-    DetachedTaskRegistry, DetachedTaskRegistryError, DetachedTaskWaitOutcome,
-};
 use tinyagents_harness::ids::TaskId;
+use tinyagents_tasks::{DetachedTaskRegistry, DetachedTaskRegistryError, DetachedTaskWaitOutcome};
 
 use super::types::{DetachedSubagentStatus, FinishedOutcome, WaitError, WaitOutcome};
 
