@@ -149,7 +149,7 @@ the model. Re-exported here as `pub mod select` and via `pub use select::*`.
 | `shared/` | `CanonicalSharedToolAdapter` (a `tinytools::Tool` over shared, non-cloneable registries) and `EarlyExitHook` (pause the run when a designated tool succeeds). |
 | `timeout.rs` | `ToolTimeoutSettings`, `ResolvedToolTimeout`. |
 | `select/` | Prompt-driven tool ranking (own submodule; see its README/module doc). |
-| `*_test.rs`, `test.rs` | Unit tests colocated by concern, listed via `#[path = "..."]` or `mod ..._test;`. |
+| `*_tests.rs`, `injected_test.rs`, `test.rs` | Unit tests colocated by concern, listed via `#[path = "..."]`. |
 
 ## Operational constraints
 
