@@ -182,8 +182,7 @@ fn replay(path: &Path) -> Result<Vec<CompletionRecord>> {
                 good_len = next;
                 needs_newline = !terminated;
             }
-            Err(err) if line.iter().all(u8::is_ascii_whitespace) => {
-                let _ = err;
+            Err(_) if line.iter().all(u8::is_ascii_whitespace) => {
                 good_len = next;
             }
             Err(err) if terminated => {
@@ -239,9 +238,11 @@ impl CompletionStore for JsonlCompletionStore {
             // the full line or a torn tail that `open` discards.
             file.write_all(line.as_bytes())
                 .map_err(|e| store_err("append", e))?;
-            file.sync_data().map_err(|e| store_err("sync", e))
-        })?;
-        self.inner.put(record)
+            file.sync_data().map_err(|e| store_err("sync", e))?;
+            // Still under the file lock, so `compact` never sees the line
+            // without the map entry (or the reverse).
+            self.inner.put(record)
+        })
     }
 
     fn list(&self, parent_key: Option<&str>) -> Vec<CompletionRecord> {
