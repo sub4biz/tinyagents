@@ -880,6 +880,14 @@ impl<Ctx> RunContext<Ctx> {
         self.call_provider_started = true;
     }
 
+    /// Records that a summarizer (a compaction, outside the model-call layer)
+    /// dispatched a provider call. Sets only the run-wide flag: the per-call
+    /// flag still describes the main model call.
+    pub(crate) fn mark_summarizer_dispatched(&mut self) {
+        tracing::debug!("[tinyagents::run] summarizer dispatched a provider call");
+        self.provider_started = true;
+    }
+
     #[doc(hidden)]
     pub fn mark_model_call_failed(&mut self) {
         self.model_call_failed = true;

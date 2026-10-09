@@ -34,7 +34,24 @@ impl ContextCompressionMiddleware {
     ///   with the lists the previous summary carried. The previous summary
     ///   reaches the summarizer without its lists, and any the summarizer
     ///   echoes are dropped, so each list appears exactly once.
-    pub(in crate::middleware::library) async fn summarize_batch(
+    pub(in crate::middleware::library) async fn summarize_batch<Ctx: Send + Sync>(
+        &self,
+        ctx: &mut RunContext<Ctx>,
+        to_summarize: &[Message],
+        to_keep: &[Message],
+        previous_summary: Option<String>,
+    ) -> Result<SummaryRecord> {
+        let (result, dispatched) = crate::summarization::dispatch::track_dispatch(
+            self.summarize_batch_inner(to_summarize, to_keep, previous_summary),
+        )
+        .await;
+        if dispatched {
+            ctx.mark_summarizer_dispatched();
+        }
+        result
+    }
+
+    async fn summarize_batch_inner(
         &self,
         to_summarize: &[Message],
         to_keep: &[Message],

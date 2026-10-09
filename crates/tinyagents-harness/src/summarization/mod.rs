@@ -25,6 +25,7 @@
 
 mod checkpoint;
 pub mod compaction;
+pub(crate) mod dispatch;
 mod file_ops;
 mod model_summarizer;
 pub mod pairing;
