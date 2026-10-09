@@ -242,6 +242,7 @@ Feature details:
 - [Tool execution context and rich returns (B1/B2)](tool-context.md)
 - [Nested tool calls (C9)](nested-tool-calls.md)
 - [Tool exposure, discovery, and schema budgets](tool-discovery.md)
+- [Tool rules: allow / deny / hide / approval patterns](tool-rules.md)
 - [Tool dialects](tool-dialect.md)
 - [Middleware feature](middleware.md)
 - [Repeat-progress guard](repeat-progress.md)
