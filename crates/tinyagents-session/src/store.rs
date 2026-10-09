@@ -152,12 +152,15 @@ pub fn with_connection<T>(
     let outcome = native
         .run_blocking(|conn| {
             let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(conn)));
-            if outcome.is_err()
-                && !conn.is_autocommit()
+            // However `f` ended — a panic, an error, or a success that forgot
+            // to commit — a transaction it left open must not outlive the
+            // call: the connection is shared, and the next caller would
+            // inherit it (and its locks).
+            if !conn.is_autocommit()
                 && let Err(rollback) = conn.execute_batch("ROLLBACK")
             {
                 tracing::warn!(
-                    "[session] rollback after a panicking session call failed: {rollback}"
+                    "[session] rollback of a transaction a session call left open failed: {rollback}"
                 );
             }
             outcome

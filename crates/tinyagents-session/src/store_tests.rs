@@ -116,3 +116,32 @@ fn a_panicking_call_leaves_the_connection_usable() {
     assert_eq!(tables, 0);
     with_transaction(workspace.path(), |_| Ok(())).unwrap();
 }
+
+#[test]
+fn a_transaction_left_open_never_reaches_the_next_call() {
+    let workspace = tempfile::tempdir().unwrap();
+    with_connection(workspace.path(), |conn| {
+        conn.execute_batch("CREATE TABLE scratch (n INTEGER)")
+            .storage_context("create")
+    })
+    .unwrap();
+    // An error mid-transaction, and a success that forgot to commit.
+    let failed: Result<()> = with_connection(workspace.path(), |conn| {
+        conn.execute_batch("BEGIN; INSERT INTO scratch VALUES (1);")
+            .storage_context("insert")?;
+        Err(TinyAgentsError::Storage("abort".into()))
+    });
+    assert!(failed.is_err());
+    with_connection(workspace.path(), |conn| {
+        conn.execute_batch("BEGIN; INSERT INTO scratch VALUES (2);")
+            .storage_context("insert")
+    })
+    .unwrap();
+    // The next transaction starts cleanly and sees neither write.
+    let rows: i64 = with_transaction(workspace.path(), |conn| {
+        conn.query_row("SELECT COUNT(*) FROM scratch", [], |row| row.get(0))
+            .storage_context("count")
+    })
+    .unwrap();
+    assert_eq!(rows, 0);
+}
