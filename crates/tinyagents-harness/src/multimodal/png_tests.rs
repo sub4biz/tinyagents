@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg(feature = "png-optimize")]
 fn fixture() -> Vec<u8> {
     let mut out = Vec::new();
     {

@@ -51,7 +51,11 @@ sqlite = ["dep:rusqlite"]
 # still spell out the old name keep compiling.
 tools = ["builtin-tools"]
 builtin-tools = ["dep:chrono-tz"]
-multimodal = ["dep:flate2", "dep:reqwest", "dep:tar", "dep:zip", "dep:oxipng"]
+multimodal = ["dep:flate2", "dep:reqwest", "dep:tar", "dep:zip"]
+# Lossless PNG re-compression (`multimodal::optimize_png_lossless`) through
+# `oxipng`. Off by default: without it the helper returns `None` and callers
+# keep the original bytes, and `oxipng`/`libdeflater` (a C build) are not linked.
+png-optimize = ["multimodal", "dep:oxipng"]
 # Image and video generation tools over tinyinference-image / -video.
 media = ["dep:tinyinference-image", "dep:tinyinference-video"]
 # Gates the Claude Code CLI and Claude Agent SDK provider adapters, which are
