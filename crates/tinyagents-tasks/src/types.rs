@@ -6,6 +6,7 @@
 //! `mod.rs` and tests live in `test.rs`.
 
 use std::collections::BTreeMap;
+use std::fmt;
 use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
