@@ -43,10 +43,6 @@ pub use invocation::{
     SubAgentSession, SubAgentTool, register_subagent_job_tools,
 };
 pub use persistence::SubagentPersistence;
-pub use step::{
-    AgentStepConfig, AgentStepError, AgentStepIdentity, AgentStepResult, StepSuccess,
-    StepWorkError, run_agent_step,
-};
 pub use planner::SubagentPlanner;
 pub use policy::{SubAgentBudget, SubAgentPolicy};
 pub use result_policy::{
@@ -55,6 +51,10 @@ pub use result_policy::{
 pub use role::{
     SUBAGENT_JOBS_TOOL, SUBAGENT_MESSAGE_TOOL, SubagentRole, is_delegation_tool, restrict_tools,
     subagent_framing,
+};
+pub use step::{
+    AgentStepConfig, AgentStepError, AgentStepIdentity, AgentStepResult, StepSuccess,
+    StepWorkError, run_agent_step,
 };
 #[allow(deprecated)]
 pub use types::SubagentStatus;

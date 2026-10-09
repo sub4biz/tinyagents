@@ -13,9 +13,7 @@ fn ident(task: &str) -> AgentStepIdentity {
     AgentStepIdentity::new("parent", task)
 }
 
-async fn ok_text(
-    text: &'static str,
-) -> Result<StepSuccess<u32>, StepWorkError> {
+async fn ok_text(text: &'static str) -> Result<StepSuccess<u32>, StepWorkError> {
     Ok(StepSuccess::new(text, 7))
 }
 
@@ -36,8 +34,8 @@ async fn default_config_is_a_passthrough() {
 
 #[tokio::test]
 async fn result_policy_cap_trims_output() {
-    let config = AgentStepConfig::default()
-        .with_result_policy(ResultPolicy::new().with_max_chars(5));
+    let config =
+        AgentStepConfig::default().with_result_policy(ResultPolicy::new().with_max_chars(5));
     let result = run_agent_step(&config, ident("a"), CancellationToken::new(), |_| {
         ok_text("0123456789abcdefghij")
     })
@@ -161,9 +159,11 @@ async fn fatal_worker_error_keeps_its_original_message() {
 async fn pre_cancelled_step_reports_cancelled_without_running() {
     let token = CancellationToken::new();
     token.cancel();
-    let err = run_agent_step(&AgentStepConfig::default(), ident("a"), token, |_| ok_text("x"))
-        .await
-        .err()
-        .unwrap();
+    let err = run_agent_step(&AgentStepConfig::default(), ident("a"), token, |_| {
+        ok_text("x")
+    })
+    .await
+    .err()
+    .unwrap();
     assert!(matches!(err, AgentStepError::Cancelled));
 }

@@ -27,10 +27,9 @@ use tinyinference_llm::usage::UsageTotals;
 use super::{
     PersistedSubagentPause, PreparedSubagent, ResultPolicy, SpawnAdmission, SpawnRejection,
     SubAgentPolicy, SubagentCapabilities, SubagentDriver, SubagentError, SubagentExecution,
-    SubagentIncomplete,
-    SubagentExecutor, SubagentOutcome, SubagentOutcomeKind, SubagentPausePersistenceDisposition,
-    SubagentPersistence, SubagentPlanner, SubagentRequest, SubagentResume, SubagentRole,
-    SubagentTaskKey, SubagentTerminalPersistenceDisposition,
+    SubagentExecutor, SubagentIncomplete, SubagentOutcome, SubagentOutcomeKind,
+    SubagentPausePersistenceDisposition, SubagentPersistence, SubagentPlanner, SubagentRequest,
+    SubagentResume, SubagentRole, SubagentTaskKey, SubagentTerminalPersistenceDisposition,
 };
 
 const LOG_PREFIX: &str = "[agent-step]";
@@ -211,7 +210,9 @@ pub struct AgentStepResult<T> {
 }
 
 type Work<T> = Arc<
-    dyn Fn(CancellationToken) -> Pin<Box<dyn Future<Output = Result<StepSuccess<T>, StepWorkError>> + Send>>
+    dyn Fn(
+            CancellationToken,
+        ) -> Pin<Box<dyn Future<Output = Result<StepSuccess<T>, StepWorkError>> + Send>>
         + Send
         + Sync,
 >;
@@ -304,7 +305,12 @@ impl SubagentPersistence for StepPersistence {
         &self,
         key: &SubagentTaskKey,
     ) -> Result<Option<SubagentOutcome>, SubagentError> {
-        Ok(self.0.lock().expect("step persistence poisoned").get(key).cloned())
+        Ok(self
+            .0
+            .lock()
+            .expect("step persistence poisoned")
+            .get(key)
+            .cloned())
     }
     async fn load(&self, _: &SubagentTaskKey) -> Result<Option<SubagentResume>, SubagentError> {
         Ok(None)
@@ -354,7 +360,10 @@ where
     F: Fn(CancellationToken) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<StepSuccess<T>, StepWorkError>> + Send + 'static,
 {
-    let target = identity.target.clone().unwrap_or_else(|| "agent-step".to_owned());
+    let target = identity
+        .target
+        .clone()
+        .unwrap_or_else(|| "agent-step".to_owned());
     tracing::debug!(
         "{LOG_PREFIX} start parent={} task={} target={target}",
         identity.parent_run_id,

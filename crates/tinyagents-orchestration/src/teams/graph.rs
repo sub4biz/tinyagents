@@ -13,11 +13,11 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use tinyagents_graph::export::GraphTopology;
-use tinyagents_harness::CancellationToken;
 use tinyagents_graph::stream::GraphEventSink;
 use tinyagents_graph::{
     ClosureStateReducer, Command, CompiledGraph, GraphBuilder, NodeContext, NodeResult,
 };
+use tinyagents_harness::CancellationToken;
 
 use crate::subagent::{
     AgentStepConfig, AgentStepError, AgentStepIdentity, StepSuccess, SubagentOutcomeKind,
@@ -203,7 +203,10 @@ where
         }),
         Err(AgentStepError::Worker(error)) => Err(error),
         Err(error @ AgentStepError::Rejected(_)) => {
-            tracing::debug!("{LOG_PREFIX} rejected member={} {error}", step.identity.task_id);
+            tracing::debug!(
+                "{LOG_PREFIX} rejected member={} {error}",
+                step.identity.task_id
+            );
             Ok(MemberOutcome::Failed {
                 reason: error.to_string(),
             })
@@ -310,3 +313,7 @@ pub fn member_graph_topology() -> Result<GraphTopology> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "graph_driver_tests.rs"]
+mod driver_tests;
