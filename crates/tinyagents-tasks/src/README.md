@@ -124,6 +124,60 @@ parent's next turn (wiring it into a host is the host's job):
 Nothing here ever relaunches a task. For the per-tool-call side of recovery see
 `tinyagents_session::run_ledger::classify_recovery`.
 
+### Durable completion router (`completions/`)
+
+A detached child finishes whenever it finishes; its parent still has to hear
+about it exactly once, even across a restart. The completion router owns that
+hand-off and nothing product-specific:
+
+- `CompletionRecord` — one finished child keyed by `task_id`: `parent_key`,
+  `agent_id`, `label`, `status` (`Success` / `Failed` / `Cancelled` /
+  `Incomplete`), `result` (`CompletionResult`: text already capped by the
+  result policy, `omitted_chars`, optional `CompletionArtifact`),
+  `finished_at`, `attempts`, `notify_mode` and `state` (`Pending` /
+  `Delivered` / `Tombstoned` / `GaveUp`).
+- `CompletionStore` — `InMemoryCompletionStore` and `JsonlCompletionStore`.
+  The JSONL log is append-only, one `fsync`ed line per change, replayed to the
+  latest record per task id on open. A torn final line from a crash is dropped
+  and the file truncated back to the last whole line; an unreadable complete
+  line is skipped with a warning. `compact(retain)` rewrites the log through a
+  temp file and an atomic rename, dropping settled records older than `retain`.
+- `CompletionRouter` — `record` (idempotent per task id), `tombstone(task_id)`
+  (the parent waited on or collected the child, so nothing further is routed; a message already pushed to a live queue is not retracted; works
+  before the completion exists), `claim_pending(parent, max)` /
+  `begin_turn(parent)` / `pull(parent, max)` (claim a batch and count an
+  attempt; a claimed record is leased until resolved), `mark_delivered(ids)`,
+  `mark_failed(ids)` (moves a record to `GaveUp` once `attempts >=
+  max_attempts`, default `DEFAULT_MAX_ATTEMPTS` = 5, and returns those records
+  for the host's give-up policy), `pending_for(parent)`, `cancel_parent` /
+  `resume_parent` (the flag is a durable marker record, so it survives a restart), `attach_parent` / `detach_parent`, `compact`, and
+  `restart_recovery_note(parent, children)`.
+- `NotifyMode`, set per spawn: `Followup` (default) pushes onto the parent's
+  `QueueLane::Followup` when the parent is attached, `Collect` onto
+  `QueueLane::Collect`, `HoldForNextTurn` waits for `begin_turn`, `Off` is
+  record-only for `pull`. A `Followup`/`Collect` record whose parent is not
+  attached stays pending for `claim_pending`. A push onto a live queue counts
+  as attempt one and leases the record; it settles only when the host calls
+  `mark_delivered`, so a crash, a cleared queue or `detach_parent` (which
+  releases that parent's leases) leaves it claimable. Delivery is at-least-once.
+  `in_flight_for` lists unacknowledged pushes and `release(ids)` frees an
+  abandoned claim without counting a failure.
+- `CompletionFormatter` — the wording. `NeutralCompletionFormatter` is the
+  default (escaped JSON in a `<completed_child_tasks>` block); a host supplies
+  its own with `CompletionRouter::with_formatter`.
+
+Task ids are the dedupe key and must be unique across parents: recording an id
+already held by another parent returns `RecordOutcome::IdCollision` and stores
+nothing.
+
+After a restart, `pending_for(parent)` returns what was never delivered and
+`restart_recovery_note` folds it into the recovery note beside the interrupted
+children. Nothing relaunches a child. The host keeps: deciding when a parent is
+idle, the delivery turn, its formatter, and what to do with a `GaveUp` record.
+`tinyagents-orchestration` records into a router from `SubagentDriver` and from
+`spawn_status_watcher_with_completions`; with no router configured its behaviour
+is unchanged.
+
 ## Files
 
 | File | Role |
@@ -136,6 +190,7 @@ Nothing here ever relaunches a task. For the per-tool-call side of recovery see
 | `runtime.rs` | `DetachedTaskRegistry<Metadata, Status>` — process-local executor handles keyed by task id. |
 | `reconcile.rs` | `reconcile_orphaned_tasks` and its report types, for settling orphans left by a dead executor. |
 | `recovery.rs` | `recovery_children` / `build_restart_recovery_note`: the parent-facing roster of interrupted children after a reconcile sweep (tests in `recovery_tests.rs`). |
+| `completions/` | `types.rs`, `store.rs`, `router.rs`, `format.rs`: the completion router (tests in `router_tests.rs`, `store_tests.rs`). |
 | `lib_tests.rs` | Unit tests (spawn/await/cancel/timeout/race semantics, store round-trips, filters, reconciliation, detached-task registry). |
 
 ## Operational constraints

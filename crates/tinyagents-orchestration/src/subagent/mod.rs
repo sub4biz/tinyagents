@@ -10,6 +10,7 @@
 //! TinyAgents layers must not depend on this module.
 
 mod admission;
+mod completion;
 mod detached;
 mod driver;
 mod executor;
@@ -23,16 +24,16 @@ mod types;
 
 pub use admission::{SpawnAdmission, SpawnPolicy, SpawnRejection, SpawnReservation};
 pub use detached::{
-    DETACHED_LEDGER_TIMEOUT_MS, DetachedSubagentStatus, FinishedOutcome, SpawnedSubagent,
-    SteerAccess, SteerError, SteerReceipt, SteerRoute, SubagentIdentity, SubagentResumeRef,
-    SubagentSnapshot, WaitError, WaitOutcome, cancel_for_thread, distinct_parent_threads,
-    list_subagent_records, orphaned_subagent_reason, queue_lane_name, record_agent_id,
-    record_cancelled, record_parent_session, record_spawned, record_status,
-    record_subagent_session_id, record_to_wait_outcome, resume_ref_for_task,
-    resume_ref_from_record, snapshot_for_owner, spawn_status_watcher, steer_detached,
-    steer_detached_with_request_id, steering_command_for_lane, subagent_record_for_task,
-    task_id_for_session, task_id_for_session_in_records, task_status_label, wait_detached,
-    wait_error_from_registry,
+    DETACHED_LEDGER_TIMEOUT_MS, DetachedCompletionTarget, DetachedSubagentStatus, FinishedOutcome,
+    SpawnedSubagent, SteerAccess, SteerError, SteerReceipt, SteerRoute, SubagentIdentity,
+    SubagentResumeRef, SubagentSnapshot, WaitError, WaitOutcome, cancel_for_thread,
+    distinct_parent_threads, list_subagent_records, orphaned_subagent_reason, queue_lane_name,
+    record_agent_id, record_cancelled, record_detached_completion, record_parent_session,
+    record_spawned, record_status, record_subagent_session_id, record_to_wait_outcome,
+    resume_ref_for_task, resume_ref_from_record, snapshot_for_owner, spawn_status_watcher,
+    spawn_status_watcher_with_completions, steer_detached, steer_detached_with_request_id,
+    steering_command_for_lane, subagent_record_for_task, task_id_for_session,
+    task_id_for_session_in_records, task_status_label, wait_detached, wait_error_from_registry,
 };
 pub use driver::{SubagentCapabilities, SubagentDriver};
 pub use executor::SubagentExecutor;
@@ -64,6 +65,10 @@ pub use types::{
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod test;
+
+#[cfg(test)]
+#[path = "driver_completion_tests.rs"]
+mod driver_completion_test;
 
 #[cfg(test)]
 #[path = "driver_policy_tests.rs"]

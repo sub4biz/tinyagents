@@ -23,6 +23,7 @@
 //! [`SubagentIdentity`]), where the store lives, progress projection, and
 //! policy.
 
+mod completion;
 mod ledger;
 mod roster;
 mod status;
@@ -30,6 +31,9 @@ mod status_map;
 mod steer;
 mod types;
 
+pub use completion::{
+    DetachedCompletionTarget, record_detached_completion, spawn_status_watcher_with_completions,
+};
 pub use ledger::{
     DETACHED_LEDGER_TIMEOUT_MS, list_subagent_records, orphaned_subagent_reason, record_agent_id,
     record_cancelled, record_parent_session, record_spawned, record_status,
@@ -50,6 +54,9 @@ pub use types::{
     SubagentSnapshot, WaitError, WaitOutcome,
 };
 
+#[cfg(test)]
+#[path = "completion_tests.rs"]
+mod completion_test;
 #[cfg(test)]
 #[path = "steer_tests.rs"]
 mod steer_test;

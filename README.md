@@ -36,7 +36,9 @@ TinyAgents is a Cargo workspace, not one crate. Depend on the pieces you need:
   `tracing`.
 - **`tinyagents-tasks`** — graph-independent detached-task machinery: task
   model, `TaskStore` (in-memory and JSONL), `DetachedTaskRegistry`, restart
-  reconciliation, and the `spawn`/`await`/`cancel`/`steer` orchestration tools.
+  reconciliation, the durable completion router (push a finished child to its
+  parent, redelivered after a restart), and the `spawn`/`await`/`cancel`/`steer`
+  orchestration tools.
   Re-exported from `tinyagents_graph::orchestration` for compatibility.
 - **`tinyagents-registry`** — a named capability catalog (models, tools,
   agents, graphs, and routers), plus an offline model price/capability catalog.
