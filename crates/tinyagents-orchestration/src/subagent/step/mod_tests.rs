@@ -42,7 +42,7 @@ async fn result_policy_cap_trims_output() {
     })
     .await
     .unwrap();
-    assert!(result.outcome.output.chars().count() <= 5);
+    assert_eq!(result.outcome.output, "01234", "hard cut to the cap");
 }
 
 #[tokio::test]
@@ -96,12 +96,21 @@ async fn allowed_targets_check_the_identity_target() {
 async fn timeout_ends_incomplete_with_typed_kind() {
     let config = AgentStepConfig::default()
         .with_policy(SubAgentPolicy::default().with_timeout(Duration::from_millis(20)));
-    let result = run_agent_step(&config, ident("a"), CancellationToken::new(), |_| async {
-        std::future::pending::<()>().await;
-        ok_text("never").await
+    let seen_token = Arc::new(std::sync::Mutex::new(None));
+    let capture = seen_token.clone();
+    let result = run_agent_step(&config, ident("a"), CancellationToken::new(), move |ctx| {
+        *capture.lock().unwrap() = Some(ctx.cancellation.clone());
+        async {
+            std::future::pending::<()>().await;
+            ok_text("never").await
+        }
     })
     .await
     .unwrap();
+    assert!(
+        seen_token.lock().unwrap().as_ref().unwrap().is_cancelled(),
+        "the worker's token was cancelled"
+    );
     match result.outcome.status {
         SubagentOutcomeKind::Incomplete(inc) => assert_eq!(inc.kind, IncompleteKind::Timeout),
         other => panic!("expected timeout, got {other:?}"),

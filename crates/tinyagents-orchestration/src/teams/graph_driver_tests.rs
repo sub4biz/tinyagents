@@ -182,3 +182,35 @@ async fn pre_cancelled_member_never_runs_its_worker() {
     assert_eq!(*ran.lock().unwrap(), 0);
     assert!(seen.failed.lock().unwrap()[0].contains("cancelled"));
 }
+
+#[tokio::test]
+async fn cancelling_while_the_worker_runs_routes_to_on_failed() {
+    let seen = Seen::default();
+    let token = CancellationToken::new();
+    let step = MemberStep::default().with_cancellation(token.clone());
+    let f = seen.failed.clone();
+    let cancel = token.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        cancel.cancel();
+    });
+    run_member_graph_with(
+        None,
+        step,
+        || async {
+            std::future::pending::<()>().await;
+            Ok(done("never"))
+        },
+        |_| async { Ok(()) },
+        move |r| {
+            let f = f.clone();
+            async move {
+                f.lock().unwrap().push(r);
+                Ok(())
+            }
+        },
+    )
+    .await
+    .unwrap();
+    assert!(seen.failed.lock().unwrap()[0].contains("cancelled"));
+}

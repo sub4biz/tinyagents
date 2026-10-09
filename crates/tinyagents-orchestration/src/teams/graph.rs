@@ -188,10 +188,19 @@ where
         &step.config,
         step.identity.clone(),
         step.cancellation.clone(),
-        move |_ctx| {
+        move |ctx| {
             let fut = run_worker();
             async move {
-                Ok(match fut.await? {
+                // A stuck worker cannot observe the token, so race it: a
+                // cancelled lifecycle (or policy timeout) ends the step.
+                let outcome = tokio::select! {
+                    biased;
+                    _ = ctx.cancellation.cancelled() => {
+                        return Err(anyhow::anyhow!("member step was cancelled").into());
+                    }
+                    outcome = fut => outcome?,
+                };
+                Ok(match outcome {
                     MemberOutcome::Completed { output } => StepSuccess::new(output, ()),
                     MemberOutcome::Failed { reason } => StepSuccess::incomplete(reason, ()),
                 })
