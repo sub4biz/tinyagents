@@ -28,9 +28,10 @@ Cargo features are package-local. `tinyagents-harness` exposes `sqlite`,
 `media`, `claude-code`, `langfuse`, `storage-drivers`, and `tracing`; `tinyagents-graph`
 exposes `sqlite`, `storage-drivers`, and `tracing`; session exposes
 `storage-drivers` and `tracing`; registry exposes `tracing`. The
-`storage-drivers` features put each store on `tinystoragedrivers` ports. Tracing
-instrumentation is always compiled in (via the `tracing` crate); the `tracing`
-features are retained no-ops for downstream feature forwards.
+`storage-drivers` features put each store on `tinystoragedrivers` ports. The harness's own
+`tracing` instrumentation is always compiled in; the `tracing` features forward
+to `tinytools-agent/tracing`, which enables that crate's `debug!`/`warn!`
+diagnostics (native-call parsing, malformed arguments).
 
 Integration tests are in `crates/tinyagents-integration-tests/tests/`, covering serialization, graph routing,
 registry binding, streaming,

@@ -87,5 +87,7 @@ the module map below.
 Cargo features are crate-local (see `Cargo.toml`): `sqlite`, `storage-drivers`,
 `builtin-tools` (with `tools` as a deprecated alias), `multimodal`,
 `png-optimize`, `media`, `claude-code` and `langfuse` (both on by default), and
-`tracing`. Tracing instrumentation is always compiled in; the `tracing` feature
-is a retained no-op for downstream feature forwards.
+`tracing`. The harness's own tracing instrumentation is always compiled in; the
+`tracing` feature forwards to `tinytools-agent/tracing`, which enables that
+crate's `debug!`/`warn!` diagnostics (native-call parsing, malformed
+arguments).

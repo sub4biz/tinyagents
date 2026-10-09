@@ -31,7 +31,7 @@ TinyAgents is a Cargo workspace, not one crate. Depend on the pieces you need:
   session, authentication, and MCP endpoint support. Features: `sqlite`,
   `storage-drivers`, `builtin-tools` (`tools` is a deprecated alias),
   `multimodal`, `png-optimize` (opt-in PNG re-compression), `media`,
-  `claude-code` and `langfuse` (both default), `tracing` (a no-op; tracing is always compiled in).
+  `claude-code` and `langfuse` (both default), `tracing` (forwards to `tinytools-agent/tracing` for its parsing diagnostics; the harness's own instrumentation is always compiled in).
 - **`tinyagents-graph`** — a LangGraph-style durable, typed state graph:
   `START`/`END`, nodes, conditional edges, `Send` fanout, reducers/channels,
   checkpoints, interrupts, subgraphs, and time travel. Features: `sqlite`,

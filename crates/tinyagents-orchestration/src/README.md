@@ -76,7 +76,10 @@ behavior.
 steps (`teams`) and workflow child steps (`workflow`) do not hand-roll their
 own lifecycle; both run through `subagent::run_agent_step`, which adapts a
 host-supplied worker onto the driver, so every agent step gets the same spawn
-admission, policy, result policy and typed outcome. See `teams/README.md` and
+admission, policy, result policy and typed outcome. Workflow steps are the one
+exception for structured output: `workflow::run_child_step` clears
+`result_policy.schema` before calling `run_agent_step` and validates the
+structured value itself (`workflow/child_step.rs`). See `teams/README.md` and
 `workflow/README.md`.
 
 Hosts remain responsible for agent definitions, model selection, credentials,
