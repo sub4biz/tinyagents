@@ -1082,3 +1082,7 @@ mod admission_test;
 #[cfg(test)]
 #[path = "mod_policy_tests.rs"]
 mod policy_test;
+
+#[cfg(test)]
+#[path = "mod_registry_tests.rs"]
+mod registry_tests;

@@ -26,8 +26,10 @@ struct DetachedTaskEntry<Metadata, Status> {
     owner_id: String,
     metadata: Metadata,
     status: watch::Receiver<Status>,
-    cancellation: CancellationToken,
-    abort: AbortHandle,
+    /// `None` once released: a settled task holds no live token.
+    cancellation: Option<CancellationToken>,
+    /// `None` for cooperative-only registrations that own no spawned task.
+    abort: Option<AbortHandle>,
     /// Steering `request_id`s already applied to this task, so a retried
     /// request is delivered once while its id remains in the bounded recent
     /// window. Older ids may be accepted again after eviction.
@@ -90,6 +92,46 @@ where
         cancellation: CancellationToken,
         abort: AbortHandle,
     ) -> Result<()> {
+        self.register_entry(
+            task_id,
+            owner_id.into(),
+            metadata,
+            status,
+            cancellation,
+            Some(abort),
+        )
+    }
+
+    /// Registers a task that is stopped only cooperatively: it owns no spawned
+    /// task to hard-abort (an inline child, or one whose supervisor lives
+    /// elsewhere). Otherwise identical to [`Self::register`].
+    pub fn register_cooperative(
+        &self,
+        task_id: TaskId,
+        owner_id: impl Into<String>,
+        metadata: Metadata,
+        status: watch::Receiver<Status>,
+        cancellation: CancellationToken,
+    ) -> Result<()> {
+        self.register_entry(
+            task_id,
+            owner_id.into(),
+            metadata,
+            status,
+            cancellation,
+            None,
+        )
+    }
+
+    fn register_entry(
+        &self,
+        task_id: TaskId,
+        owner_id: String,
+        metadata: Metadata,
+        status: watch::Receiver<Status>,
+        cancellation: CancellationToken,
+        abort: Option<AbortHandle>,
+    ) -> Result<()> {
         if self.len().map_err(Self::tinyagents_error)? >= self.soft_cap {
             self.sweep_terminal().map_err(Self::tinyagents_error)?;
         }
@@ -102,15 +144,69 @@ where
         guard.insert(
             task_id,
             DetachedTaskEntry {
-                owner_id: owner_id.into(),
+                owner_id,
                 metadata,
                 status,
-                cancellation,
+                cancellation: Some(cancellation),
                 abort,
                 steer_requests: RecentRequestIds::default(),
             },
         );
         Ok(())
+    }
+
+    /// Requests cooperative cancellation of an owned, still-live task.
+    ///
+    /// Unlike [`Self::cancel`] this neither removes the entry nor aborts a
+    /// spawned task: the task's own token is tripped and released, and the
+    /// entry stays registered so the executor can publish its terminal status.
+    /// Unknown, foreign and already-terminal tasks are rejected without
+    /// touching the token. Returns the snapshot taken before the request.
+    pub fn cancel_cooperative(
+        &self,
+        task_id: &TaskId,
+        owner_id: &str,
+    ) -> std::result::Result<DetachedTaskSnapshot<Metadata, Status>, DetachedTaskRegistryError>
+    {
+        let mut guard = self.lock()?;
+        let entry = guard
+            .get_mut(task_id)
+            .ok_or(DetachedTaskRegistryError::Unknown)?;
+        if entry.owner_id != owner_id {
+            return Err(DetachedTaskRegistryError::NotOwned);
+        }
+        if (self.is_terminal)(&entry.status.borrow()) {
+            return Err(DetachedTaskRegistryError::AlreadyDone);
+        }
+        if let Some(token) = entry.cancellation.take() {
+            token.cancel();
+        }
+        Ok(Self::snapshot_entry(task_id, entry))
+    }
+
+    /// Trusted-control (no owner check, like [`Self::snapshot_trusted`]): drops
+    /// a task's cancellation token without cancelling it, for the executor that
+    /// settles the task and no longer needs to hold a live token.
+    pub fn release_cancellation_trusted(
+        &self,
+        task_id: &TaskId,
+    ) -> std::result::Result<(), DetachedTaskRegistryError> {
+        self.lock()?
+            .get_mut(task_id)
+            .ok_or(DetachedTaskRegistryError::Unknown)?
+            .cancellation = None;
+        Ok(())
+    }
+
+    /// Whether the task still holds a live (unreleased) cancellation token.
+    pub fn holds_cancellation(
+        &self,
+        task_id: &TaskId,
+    ) -> std::result::Result<bool, DetachedTaskRegistryError> {
+        Ok(self
+            .lock()?
+            .get(task_id)
+            .is_some_and(|entry| entry.cancellation.is_some()))
     }
 
     /// Records a steering `request_id` against `task_id`.
@@ -392,8 +488,12 @@ where
                 .ok_or(DetachedTaskRegistryError::Unknown)?
         };
         self.steering.deregister(task_id);
-        entry.cancellation.cancel();
-        entry.abort.abort();
+        if let Some(cancellation) = &entry.cancellation {
+            cancellation.cancel();
+        }
+        if let Some(abort) = &entry.abort {
+            abort.abort();
+        }
         Ok(CancelledDetachedTask {
             task_id: task_id.clone(),
             owner_id: entry.owner_id,

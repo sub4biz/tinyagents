@@ -309,6 +309,74 @@ async fn detached_registry_reports_a_poisoned_lock() {
     join.abort();
 }
 
+#[tokio::test]
+async fn cooperative_registration_cancels_without_removing_or_aborting() {
+    let registry = runtime_registry();
+    let task_id = TaskId::new("coop-cancel");
+    let (tx, rx, _cancellation, join) = detached_handles();
+    let cancellation = CancellationToken::new();
+    registry
+        .register_cooperative(
+            task_id.clone(),
+            "parent",
+            "meta".to_string(),
+            rx,
+            cancellation.clone(),
+        )
+        .unwrap();
+    assert!(registry.holds_cancellation(&task_id).unwrap());
+
+    assert_eq!(
+        registry.cancel_cooperative(&task_id, "other").unwrap_err(),
+        DetachedTaskRegistryError::NotOwned
+    );
+    assert!(!cancellation.is_cancelled());
+
+    let snapshot = registry.cancel_cooperative(&task_id, "parent").unwrap();
+    assert_eq!(snapshot.status, RuntimeStatus::Running);
+    assert!(cancellation.is_cancelled());
+    // The entry stays registered and the token is released.
+    assert_eq!(registry.len().unwrap(), 1);
+    assert!(!registry.holds_cancellation(&task_id).unwrap());
+
+    tx.send(RuntimeStatus::Completed("x".into())).unwrap();
+    assert_eq!(
+        registry.cancel_cooperative(&task_id, "parent").unwrap_err(),
+        DetachedTaskRegistryError::AlreadyDone
+    );
+    join.abort();
+}
+
+#[tokio::test]
+async fn release_cancellation_drops_the_token_without_cancelling_it() {
+    let registry = runtime_registry();
+    let task_id = TaskId::new("coop-release");
+    let (_tx, rx, _c, join) = detached_handles();
+    let cancellation = CancellationToken::new();
+    registry
+        .register_cooperative(
+            task_id.clone(),
+            "p",
+            "m".to_string(),
+            rx,
+            cancellation.clone(),
+        )
+        .unwrap();
+    assert_eq!(
+        registry
+            .release_cancellation_trusted(&TaskId::new("missing"))
+            .unwrap_err(),
+        DetachedTaskRegistryError::Unknown
+    );
+    registry.release_cancellation_trusted(&task_id).unwrap();
+    assert!(!registry.holds_cancellation(&task_id).unwrap());
+    assert!(!cancellation.is_cancelled());
+    // Hard cancel still works on an entry that holds no abort handle.
+    let cancelled = registry.cancel_trusted(&task_id).unwrap();
+    assert_eq!(cancelled.metadata, "m");
+    join.abort();
+}
+
 fn unique_log_path(tag: &str) -> std::path::PathBuf {
     // Deterministic-per-test path in the system temp dir (no clock/random ids).
     std::env::temp_dir().join(format!("tinyagents-taskstore-{tag}.jsonl"))

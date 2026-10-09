@@ -263,16 +263,16 @@ async fn terminal_jobs_never_return_to_running() {
 async fn settled_jobs_release_their_cancellation_token() {
     let jobs = SubAgentJobRegistry::new();
     let (job_id, _steering) = jobs.create("worker", 1);
-    assert!(jobs.inner.read().unwrap()[&job_id].cancellation.is_some());
+    assert!(jobs.holds_live_cancellation(&job_id));
     jobs.cancel_owned(job_id.as_str(), 1).expect("cancel");
-    assert!(jobs.inner.read().unwrap()[&job_id].cancellation.is_none());
-    assert!(!jobs.inner.read().unwrap()[&job_id].job.status.is_terminal());
+    assert!(!jobs.holds_live_cancellation(&job_id));
+    assert!(!jobs.get(job_id.as_str()).unwrap().status.is_terminal());
     jobs.mark_result(&job_id, Err(TinyAgentsError::Cancelled));
-    assert!(jobs.inner.read().unwrap()[&job_id].job.status.is_terminal());
+    assert!(jobs.get(job_id.as_str()).unwrap().status.is_terminal());
 
     let (aborted, _steering) = jobs.create("worker", 1);
     jobs.mark_aborted(&aborted, true);
-    assert!(jobs.inner.read().unwrap()[&aborted].cancellation.is_none());
+    assert!(!jobs.holds_live_cancellation(&aborted));
 }
 
 #[tokio::test]
