@@ -151,10 +151,11 @@ impl SubagentPersistence for StepPersistence {
         outcome: &SubagentOutcome,
         _: Option<&SubagentResume>,
     ) -> Result<SubagentTerminalPersistenceDisposition, SubagentError> {
-        self.0
-            .lock()
-            .expect("step persistence poisoned")
-            .insert(key.clone(), outcome.clone());
+        let mut map = self.0.lock().expect("step persistence poisoned");
+        if map.contains_key(key) {
+            return Ok(SubagentTerminalPersistenceDisposition::Existing);
+        }
+        map.insert(key.clone(), outcome.clone());
         Ok(SubagentTerminalPersistenceDisposition::Inserted)
     }
 }

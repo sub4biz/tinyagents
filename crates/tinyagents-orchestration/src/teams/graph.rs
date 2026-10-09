@@ -139,11 +139,13 @@ where
                 // A stuck worker cannot observe the token, so race it: a
                 // cancelled lifecycle (or policy timeout) ends the step.
                 let outcome = tokio::select! {
+                    // A worker that has already produced its result wins over
+                    // a cancellation observed afterwards.
                     biased;
+                    outcome = fut => outcome?,
                     _ = ctx.cancellation.cancelled() => {
                         return Err(anyhow::anyhow!("member step was cancelled").into());
                     }
-                    outcome = fut => outcome?,
                 };
                 Ok(match outcome {
                     MemberOutcome::Completed { output } => StepSuccess::new(output, ()),
