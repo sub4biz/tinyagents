@@ -20,8 +20,9 @@ pub const DEFAULT_MAX_ATTEMPTS: u32 = 5;
 /// What [`CompletionRouter::record`] did with a completion.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RecordOutcome {
-    /// Stored. `lane` is set when it was handed to a live parent's queue (and
-    /// so is already [`CompletionState::Delivered`]).
+    /// Stored. `lane` is set when it was pushed onto a live parent's queue; the
+    /// record is then pending and leased until the host calls
+    /// [`CompletionRouter::mark_delivered`].
     Recorded {
         /// The lane the completion was pushed onto, if any.
         lane: Option<QueueLane>,
@@ -79,7 +80,7 @@ impl CompletionRouter {
         }
     }
 
-    /// Replaces the formatter (the host's `<background_agent_*>` wording).
+    /// Replaces the formatter (the host's own wording).
     pub fn with_formatter(mut self, formatter: Arc<dyn CompletionFormatter>) -> Self {
         self.formatter = formatter;
         self
@@ -118,19 +119,60 @@ impl CompletionRouter {
     }
 
     /// Marks `parent_key` no longer live. Later completions stay pending.
+    ///
+    /// The parent's queue is presumed gone, so leases on its in-flight pushes
+    /// are released and those records can be claimed again. Acknowledge what the
+    /// parent already received with [`Self::mark_delivered`] first.
     pub fn detach_parent(&self, parent_key: &str) {
         tracing::debug!(parent_key = %parent_key, "{LOG_PREFIX} parent detached");
         if let Ok(mut state) = self.lock() {
             state.parents.remove(parent_key);
+            self.release_parent_locked(&mut state, parent_key);
         }
+    }
+
+    fn release_parent_locked(&self, state: &mut RouterState, parent_key: &str) {
+        for record in self.store.list(Some(parent_key)) {
+            state.leased.remove(&record.task_id);
+        }
+    }
+
+    /// Releases the lease on `task_ids` without counting a failure, so they can
+    /// be claimed again. Use it when a claim or push was abandoned (a dropped
+    /// delivery future, a cleared queue). Attempts already counted stay counted.
+    pub fn release<S: AsRef<str>>(&self, task_ids: &[S]) {
+        if let Ok(mut state) = self.lock() {
+            for id in task_ids {
+                state.leased.remove(id.as_ref());
+            }
+        }
+    }
+
+    /// Records pushed onto `parent_key`'s live queue (or claimed) and not yet
+    /// acknowledged, oldest first.
+    pub fn in_flight_for(&self, parent_key: &str) -> Vec<CompletionRecord> {
+        let Ok(state) = self.lock() else {
+            return Vec::new();
+        };
+        let mut records: Vec<_> = self
+            .store
+            .list(Some(parent_key))
+            .into_iter()
+            .filter(|r| r.state == CompletionState::Pending && state.leased.contains(&r.task_id))
+            .collect();
+        sort_oldest_first(&mut records);
+        records
     }
 
     /// Records a finished child, idempotent per task id.
     ///
     /// A new record is stored `Pending`. If its [`NotifyMode`] is `Followup` or
-    /// `Collect` and the parent is attached, it is then pushed onto that lane
-    /// and settles as `Delivered` (the hand-off to the live queue is the
-    /// delivery attempt). Every other case stays pending for the pull side.
+    /// `Collect` and the parent is attached, it is also pushed onto that lane,
+    /// counted as attempt one and leased. The queue is in memory and has no
+    /// acknowledgement, so the record settles only when the host calls
+    /// [`Self::mark_delivered`] after the parent has the message; if the queue
+    /// is lost first ([`Self::detach_parent`], [`Self::release`], or a restart)
+    /// the record is claimable again. Delivery is at-least-once.
     pub async fn record(&self, mut record: CompletionRecord) -> Result<RecordOutcome> {
         let push = {
             let state = self.lock()?;
@@ -176,6 +218,10 @@ impl CompletionRouter {
                 NotifyMode::Collect => Some(QueueLane::Collect),
                 NotifyMode::HoldForNextTurn | NotifyMode::Off => None,
             };
+            // A live push is a delivery attempt, not a delivery: the record
+            // stays pending and leased until the host acknowledges it with
+            // `mark_delivered`, so a crash, a cleared queue or a detached parent
+            // never loses it (it is redelivered through `claim_pending`).
             match lane.and_then(|lane| {
                 state
                     .parents
@@ -184,9 +230,9 @@ impl CompletionRouter {
             }) {
                 Some((lane, queue)) => {
                     record.attempts = 1;
-                    record.state = CompletionState::Delivered;
                     record.updated_at = SystemTime::now();
                     self.store.put(&record)?;
+                    state.leased.insert(record.task_id.clone());
                     Some((lane, queue))
                 }
                 None => None,
@@ -394,10 +440,16 @@ impl CompletionRouter {
     /// completion that finished but was never delivered, framed by the
     /// formatter. Empty when there is nothing to say. Read-only; the host
     /// settles the completions with [`Self::mark_delivered`] once it has
-    /// injected the note. Nothing is relaunched.
+    /// injected the note. `Off` (pull-only) records and ones a claim currently
+    /// holds are left out. Nothing is relaunched.
     pub fn restart_recovery_note(&self, parent_key: &str, children: &[RecoveryChild]) -> String {
         let interrupted = build_restart_recovery_note(children);
-        let pending = self.pending_for(parent_key);
+        let leased = self.lock().map(|s| s.leased.clone()).unwrap_or_default();
+        let pending: Vec<_> = self
+            .pending_for(parent_key)
+            .into_iter()
+            .filter(|r| r.notify_mode != NotifyMode::Off && !leased.contains(&r.task_id))
+            .collect();
         if pending.is_empty() {
             return interrupted;
         }

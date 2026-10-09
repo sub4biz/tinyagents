@@ -237,9 +237,15 @@ impl CompletionStore for JsonlCompletionStore {
                 .map_err(|_| store_err("file lock", "poisoned"))?;
             // One write_all of the whole line, then fsync: a crash leaves either
             // the full line or a torn tail that `open` discards.
-            file.write_all(line.as_bytes())
-                .map_err(|e| store_err("append", e))?;
-            file.sync_data().map_err(|e| store_err("sync", e))?;
+            let start = file.metadata().map_err(|e| store_err("stat", e))?.len();
+            let written = file
+                .write_all(line.as_bytes())
+                .and_then(|()| file.sync_data());
+            if let Err(e) = written {
+                // Drop a partial line so the next append cannot fuse with it.
+                let _ = file.set_len(start);
+                return Err(store_err("append", e));
+            }
             // Still under the file lock, so `compact` never sees the line
             // without the map entry (or the reverse).
             self.inner.put(record)
@@ -262,8 +268,12 @@ impl CompletionStore for JsonlCompletionStore {
             let kept: Vec<&CompletionRecord> =
                 map.values().filter(|r| !expired(r, now, retain)).collect();
             let tmp = self.path.with_extension("jsonl.tmp");
-            {
-                let mut out = std::fs::File::create(&tmp)
+            let mut out = {
+                let mut out = std::fs::OpenOptions::new()
+                    .create(true)
+                    .truncate(true)
+                    .write(true)
+                    .open(&tmp)
                     .map_err(|e| store_err("create compaction file", e))?;
                 for record in &kept {
                     let mut line = serde_json::to_string(record)
@@ -274,14 +284,19 @@ impl CompletionStore for JsonlCompletionStore {
                 }
                 out.sync_all()
                     .map_err(|e| store_err("sync compaction file", e))?;
-            }
+                out
+            };
             std::fs::rename(&tmp, &self.path).map_err(|e| store_err("swap compacted log", e))?;
             if let Some(dir) = self.path.parent().filter(|p| !p.as_os_str().is_empty())
                 && let Ok(dir) = std::fs::File::open(dir)
             {
                 let _ = dir.sync_all();
             }
-            *file = open_append(&self.path)?;
+            // The handle that wrote the compacted file follows its inode across
+            // the rename, so the swap and the handle change are one step.
+            std::io::Seek::seek(&mut out, std::io::SeekFrom::End(0))
+                .map_err(|e| store_err("seek compacted log", e))?;
+            *file = out;
             let keep: std::collections::HashSet<String> =
                 kept.iter().map(|r| r.task_id.clone()).collect();
             map.retain(|id, _| keep.contains(id));
