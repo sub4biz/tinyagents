@@ -112,10 +112,19 @@ impl SubAgentJobRegistry {
         let (status, watcher) = watch::channel(job);
         let mut controls = self.controls();
         self.steering.register(task_id.clone(), steering.clone());
-        // Ids are unique, so registration can only fail on a poisoned lock.
-        self.tasks
-            .register_cooperative(task_id, owner.to_string(), JobMeta, watcher, cancellation)
-            .expect("subagent job registration");
+        // Ids are unique, so registration can only fail on a poisoned lock;
+        // the job is then left untracked rather than aborting the spawn.
+        if let Err(error) = self.tasks.register_cooperative(
+            task_id.clone(),
+            owner.to_string(),
+            JobMeta,
+            watcher,
+            cancellation,
+        ) {
+            tracing::error!("{LOG_PREFIX} register.failed job_id={id} error={error}");
+            self.steering.deregister(&task_id);
+            return (id, steering);
+        }
         controls.insert(
             id.clone(),
             JobControl {
@@ -308,10 +317,19 @@ impl SubAgentJobRegistry {
 
     /// Returns a snapshot for `job_id` when it belongs to `owner`.
     pub(crate) fn get_owned(&self, job_id: &str, owner: u64) -> Option<SubAgentJob> {
-        self.tasks
+        match self
+            .tasks
             .snapshot(&TaskId::new(job_id), &owner.to_string())
-            .ok()
-            .map(|snapshot| snapshot.status)
+        {
+            Ok(snapshot) => Some(snapshot.status),
+            Err(DetachedTaskRegistryError::Unknown | DetachedTaskRegistryError::NotOwned) => None,
+            Err(error) => {
+                tracing::warn!(
+                    "{LOG_PREFIX} get_owned.registry_error job_id={job_id} error={error}"
+                );
+                None
+            }
+        }
     }
 
     /// Returns a job snapshot for trusted host-side supervision.

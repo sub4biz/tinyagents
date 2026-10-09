@@ -191,9 +191,10 @@ where
         &self,
         task_id: &TaskId,
     ) -> std::result::Result<(), DetachedTaskRegistryError> {
-        if let Some(entry) = self.lock()?.get_mut(task_id) {
-            entry.cancellation = None;
-        }
+        self.lock()?
+            .get_mut(task_id)
+            .ok_or(DetachedTaskRegistryError::Unknown)?
+            .cancellation = None;
         Ok(())
     }
 

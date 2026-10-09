@@ -362,6 +362,12 @@ async fn release_cancellation_drops_the_token_without_cancelling_it() {
             cancellation.clone(),
         )
         .unwrap();
+    assert_eq!(
+        registry
+            .release_cancellation_trusted(&TaskId::new("missing"))
+            .unwrap_err(),
+        DetachedTaskRegistryError::Unknown
+    );
     registry.release_cancellation_trusted(&task_id).unwrap();
     assert!(!registry.holds_cancellation(&task_id).unwrap());
     assert!(!cancellation.is_cancelled());
