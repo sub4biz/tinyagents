@@ -255,3 +255,12 @@ pub fn lifecycle_close_turn<State: Send + Sync, Ctx: Send + Sync>(
 ) {
     ctx.close_turn(harness.policy().capture, messages);
 }
+
+/// Reports that the transcript was truncated to `new_len` messages, emitting
+/// `MessageRetracted` for each announced message removed (highest index first).
+/// A driver whose node discards its state (an interrupt re-runs the node from
+/// its entry state) calls this so a mirror stays consistent with the transcript
+/// that will actually be kept.
+pub fn lifecycle_retract<Ctx>(ctx: &mut RunContext<Ctx>, new_len: usize) {
+    ctx.retract_transcript(new_len);
+}

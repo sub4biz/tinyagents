@@ -44,15 +44,24 @@ after the assistant reply, after a tool batch, and at the end of the run,
 including after `after_agent`). `MessageRetracted` and `TranscriptRewritten`
 come from direct-loop recovery paths the graph rendition does not implement. The
 step-by-step `LoopIter` and `compile_loop` graph announce the same events and
-treat the transcript present at their first node activation as the seed.
+treat the transcript present at their first node activation (any node) as the seed. A node that
+interrupts discards its state and re-runs on resume, so the appends it announced
+are retracted with `MessageRetracted` first.
+
+Known differences from the direct loop: the graph rendition closes a turn before
+an output-retry prompt is announced (the direct loop announces the prompt first),
+and `LoopIter` / `compile_loop` do not close an open turn when a node errors
+(`GraphLoopDriver` does, on every exit).
 
 ## `provider_started` and summarizers
 
 `provider_started` is true once any provider call was dispatched, including a
 context-window summarizer's. Summarizer calls bypass the run context's dispatch
 marker, so the compaction middleware scopes each summarization with a dispatch
-tracker (`summarization::dispatch`): a model-backed summarizer marks it right
-before it calls its model, and the middleware then sets the run-wide flag. A
+tracker (`summarization::dispatch`): the built-in model-backed summarizers (`ModelSummarizer`, `TaskStateSummarizer`)
+mark it right before they call their model (host-defined `Summarizer` impls
+cannot, since `mark_dispatched` is crate-private; they still count when they
+fail with usage), and the middleware then sets the run-wide flag. A
 summarizer that fails with no usage after dispatching (a transport error) still
 reports `provider_started: true`; one rejected before dispatch (empty input,
 validation) does not. Only the run-wide flag is set, so a timeout during the main

@@ -310,7 +310,7 @@ async fn a_checkpoint_resume_in_a_fresh_runtime_neither_reannounces_input_nor_du
     use tinyagents_graph::InMemoryCheckpointer;
     use tinyagents_graph::agent_loop::{LoopRuntime, LoopState, compile_loop};
 
-    let build = || {
+    let build = |armed: bool| {
         let mut harness: AgentHarness<()> = AgentHarness::new();
         harness
             .register_model(
@@ -323,22 +323,22 @@ async fn a_checkpoint_resume_in_a_fresh_runtime_neither_reannounces_input_nor_du
             .set_default_model("mock")
             .register_tool(Arc::new(FakeTool::returning("lookup", "out")))
             .push_middleware(Arc::new(PauseOnce(std::sync::atomic::AtomicBool::new(
-                true,
+                armed,
             ))));
         Arc::new(harness)
     };
     let checkpointer = Arc::new(InMemoryCheckpointer::<LoopState>::default());
     let recorder = EventRecorder::new();
     let graph_for = |harness: Arc<AgentHarness<()>>| {
-        let ctx = RunContext::new(RunConfig::new("resume-lifecycle"), ())
-            .with_events(recorder.sink());
+        let ctx =
+            RunContext::new(RunConfig::new("resume-lifecycle"), ()).with_events(recorder.sink());
         let rt = Arc::new(LoopRuntime::for_run(harness, Arc::new(()), ctx));
         compile_loop(rt)
             .expect("compiles")
             .with_checkpointer(checkpointer.clone())
     };
 
-    let first = graph_for(build())
+    let first = graph_for(build(true))
         .run_with_thread("t", LoopState::seed(vec![Message::user("go")]))
         .await
         .expect("first leg reaches the interrupt");
@@ -346,8 +346,7 @@ async fn a_checkpoint_resume_in_a_fresh_runtime_neither_reannounces_input_nor_du
 
     // A different harness and runtime resumes from the checkpoint. The pause
     // already fired, so the second leg runs to the end.
-    // (`build` arms a fresh PauseOnce; disarm it by consuming the one shot.)
-    let second = build();
+    let second = build(false);
     let resumed = graph_for(second)
         .resume(
             "t",
@@ -363,12 +362,18 @@ async fn a_checkpoint_resume_in_a_fresh_runtime_neither_reannounces_input_nor_du
     assert!(resumed.state.finished);
 
     let events = lifecycle(&recorder.events());
-    assert!(!events.iter().any(|e| e.starts_with("append:0:")), "{events:?}");
+    assert!(
+        !events.iter().any(|e| e.starts_with("append:0:")),
+        "{events:?}"
+    );
     let mut live = std::collections::BTreeSet::new();
     for event in recorder.events() {
         match event {
             AgentEvent::MessageAppended { index, .. } => {
-                assert!(live.insert(index), "index {index} announced twice: {events:?}");
+                assert!(
+                    live.insert(index),
+                    "index {index} announced twice: {events:?}"
+                );
             }
             AgentEvent::MessageRetracted { index } => {
                 live.remove(&index);

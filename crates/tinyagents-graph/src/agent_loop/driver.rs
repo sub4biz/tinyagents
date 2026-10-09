@@ -256,8 +256,9 @@ where
                     .then(|| ctx.peek_last_limit())
                     .flatten();
                 let mut outcome = TerminalOutcome::from_error(error, site).with_limit_kind(kind);
-                // A failed summarizer already received a provider response, though
-                // summarizer calls bypass the context's dispatch marker.
+                // A failed summarizer already received a provider response; keep the
+                // match for summarizers that report usage but never marked dispatch
+                // (host-defined `Summarizer` impls cannot call `mark_dispatched`).
                 outcome.provider_started = ctx.provider_started()
                     || matches!(error, TinyAgentsError::SummarizationUsage { .. });
                 Some(outcome)

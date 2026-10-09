@@ -320,6 +320,8 @@ where
         return Err(TinyAgentsError::LimitExceeded(error.to_string()));
     }
 
+    phases::lifecycle_seed(ctx, loop_state.messages.len());
+    let entry_len = loop_state.messages.len();
     let request = loop_state
         .pending_request
         .take()
@@ -518,7 +520,9 @@ where
     // has the real tool-routing decision to fall through to instead of an
     // arbitrary default.
     if let Some(control) = ctx.take_control() {
-        return apply_control(ctx, &mut loop_state, control, node::MODEL, route);
+        let result = apply_control(ctx, &mut loop_state, control, node::MODEL, route);
+        retract_on_interrupt(ctx, &result, entry_len);
+        return result;
     }
     // Stash the response for `settle` to extract structured output from.
     // Reusing `pending_request`'s sibling field would need a new field; keep
@@ -552,6 +556,8 @@ where
     State: Send + Sync,
     Ctx: Send + Sync,
 {
+    phases::lifecycle_seed(ctx, loop_state.messages.len());
+    let entry_len = loop_state.messages.len();
     let calls = std::mem::take(&mut loop_state.pending_tool_calls);
     let outcome = phases::execute_tool_batch(
         harness,
@@ -598,7 +604,9 @@ where
     }
 
     if let Some(control) = ctx.take_control() {
-        return apply_control(ctx, &mut loop_state, control, node::TOOLS, node::PLAN);
+        let result = apply_control(ctx, &mut loop_state, control, node::TOOLS, node::PLAN);
+        retract_on_interrupt(ctx, &result, entry_len);
+        return result;
     }
 
     Ok(goto(loop_state, node::PLAN))
@@ -607,6 +615,26 @@ where
 /// The `settle` node body: extracts/validates structured output when the
 /// turn planned one, drives the output-validation retry loop
 /// (`RunPolicy::output_retry`), and finishes the run.
+/// An interrupted node's state is discarded and the node re-runs from its entry
+/// state on resume, so the appends it already announced are retracted: the
+/// re-run announces them again, and events never name a message the kept
+/// transcript lacks.
+fn retract_on_interrupt<Ctx>(
+    ctx: &mut RunContext<Ctx>,
+    result: &Result<NodeResult<LoopState>>,
+    entry_len: usize,
+) {
+    if matches!(result, Ok(NodeResult::Interrupt(_))) {
+        tracing::debug!(
+            target: "tinyagents::agent_loop",
+            run_id = %ctx.run_id(),
+            entry_len,
+            "[graph_loop] node interrupted; retracting its announced appends"
+        );
+        phases::lifecycle_retract(ctx, entry_len);
+    }
+}
+
 pub(crate) async fn settle_node<State, Ctx>(
     harness: &AgentHarness<State, Ctx>,
     ctx: &mut RunContext<Ctx>,
@@ -617,6 +645,7 @@ where
     State: Send + Sync,
     Ctx: Send + Sync,
 {
+    phases::lifecycle_seed(ctx, loop_state.messages.len());
     // The final assistant message is the last append of its turn; close the
     // turn before any output-retry prompt is pushed (that prompt is announced
     // with the next turn's start).
