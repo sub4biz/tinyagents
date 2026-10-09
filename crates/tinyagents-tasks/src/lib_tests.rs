@@ -354,7 +354,13 @@ async fn release_cancellation_drops_the_token_without_cancelling_it() {
     let (_tx, rx, _c, join) = detached_handles();
     let cancellation = CancellationToken::new();
     registry
-        .register_cooperative(task_id.clone(), "p", "m".to_string(), rx, cancellation.clone())
+        .register_cooperative(
+            task_id.clone(),
+            "p",
+            "m".to_string(),
+            rx,
+            cancellation.clone(),
+        )
         .unwrap();
     registry.release_cancellation(&task_id).unwrap();
     assert!(!registry.holds_cancellation(&task_id).unwrap());
