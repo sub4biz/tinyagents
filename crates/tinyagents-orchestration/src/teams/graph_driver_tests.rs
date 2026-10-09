@@ -6,7 +6,9 @@ use super::*;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::subagent::{ResultPolicy, SpawnAdmission, SpawnPolicy, SubAgentPolicy};
+use tinyagents_harness::CancellationToken;
+
+use crate::subagent::{AgentStepConfig, ResultPolicy, SpawnAdmission, SpawnPolicy, SubAgentPolicy};
 
 #[derive(Default, Clone)]
 struct Seen {

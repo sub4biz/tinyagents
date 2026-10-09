@@ -2,7 +2,10 @@
 //! validation errors.
 
 use serde::Serialize;
+use tinyagents_harness::CancellationToken;
 use tinyagents_session::run_ledger::{AgentTeam, AgentTeamMember, AgentTeamTask};
+
+use crate::subagent::{AgentStepConfig, AgentStepIdentity};
 
 /// Sentinel sender for a lead or user message rather than a member row.
 ///
@@ -89,3 +92,55 @@ impl std::fmt::Display for TeamError {
 }
 
 impl std::error::Error for TeamError {}
+
+/// The driver-side policy and identity of one member step.
+///
+/// [`run_member_graph`] uses [`MemberStep::default`], which is inert (unlimited
+/// admission, no timeout, one attempt, no result trimming), so the worker runs
+/// exactly as it did before the step went through
+/// [`SubagentDriver`](crate::subagent::SubagentDriver). Hosts that want the
+/// driver's limits call [`run_member_graph_with`].
+#[derive(Clone)]
+pub struct MemberStep {
+    /// Spawn admission, timeout/retry/budget, result policy and role.
+    pub config: AgentStepConfig,
+    /// Team (admission scope) and member (task id, allowlist target).
+    pub identity: AgentStepIdentity,
+    /// Lifecycle cancellation of the enclosing run. A token cancelled before
+    /// the step starts keeps the worker from running (the member is routed to
+    /// `on_failed`); cancelling it later cancels the worker's child token.
+    pub cancellation: CancellationToken,
+}
+
+impl MemberStep {
+    /// A step for `member_id` of `team_id` under `config`; the member id is
+    /// also the allowlist target.
+    pub fn new(
+        config: AgentStepConfig,
+        team_id: impl Into<String>,
+        member_id: impl Into<String>,
+    ) -> Self {
+        let member_id = member_id.into();
+        Self {
+            config,
+            identity: AgentStepIdentity::new(team_id, member_id.clone()).with_target(member_id),
+            cancellation: CancellationToken::new(),
+        }
+    }
+
+    /// Ties the step to the enclosing run's cancellation token.
+    pub fn with_cancellation(mut self, cancellation: CancellationToken) -> Self {
+        self.cancellation = cancellation;
+        self
+    }
+}
+
+impl Default for MemberStep {
+    fn default() -> Self {
+        Self {
+            config: AgentStepConfig::default(),
+            identity: AgentStepIdentity::new("team", "member"),
+            cancellation: CancellationToken::new(),
+        }
+    }
+}
