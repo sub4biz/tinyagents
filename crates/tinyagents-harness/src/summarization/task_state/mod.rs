@@ -260,6 +260,7 @@ impl TaskStateSummarizer {
             request = request.with_response_format(format.clone());
         }
         for attempt in 1..=STATE_ATTEMPTS {
+            crate::summarization::dispatch::mark_dispatched();
             let response = self.model.invoke(&(), request.clone()).await.map_err(|e| {
                 tracing::warn!(error = %e, "[tinyagents::task_state] state-update call failed");
                 TinyAgentsError::Model(format!("task-state model call failed: {e}"))

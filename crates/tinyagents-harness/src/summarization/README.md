@@ -23,6 +23,13 @@ loop.
   `SummarizationPolicy::plan` decides the split between `to_summarize` and
   `to_keep`; a `Summarizer` then condenses the former into a `SummaryRecord`
   carrying `CompressionProvenance`.
+- **Dispatch tracking** (`dispatch.rs`): summarizer calls bypass the run
+  context's provider-dispatch marker. `ContextCompressionMiddleware` scopes each
+  summarization with `track_dispatch`, `ModelSummarizer` calls `mark_dispatched`
+  right before it invokes its model, and the middleware then sets the run's
+  `provider_started`, so a summarizer that fails without usage after dispatching
+  still reports `TerminalOutcome::provider_started`. A rejection before dispatch
+  does not.
 - **Tool-call pairing** (`pairing.rs`) is the structural safety net both of
   the above rely on: a naive length-based cut point routinely separates an
   assistant tool-call turn from the tool results answering it, producing a

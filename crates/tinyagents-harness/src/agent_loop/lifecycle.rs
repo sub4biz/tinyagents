@@ -29,6 +29,10 @@ pub(crate) struct TurnTracker {
     turn: u32,
     /// The open turn and the transcript index it started at.
     open: Option<(u32, usize)>,
+    /// Whether the seed has been fixed. A context that never went through
+    /// [`TurnTracker::new`] (a graph run entered mid-flight) is seeded on first
+    /// use by [`TurnTracker::ensure_seeded`].
+    seeded: bool,
 }
 
 pub(crate) fn role_of(message: &Message) -> &'static str {
@@ -50,6 +54,39 @@ impl TurnTracker {
             seed_len,
             turn: 0,
             open: None,
+            seeded: true,
+        }
+    }
+
+    /// Continues numbering from `completed_turns` (a resumed run in a fresh
+    /// runtime starts its tracker at zero) and, when `open_from` is given and no
+    /// turn is open, re-opens the in-flight turn that began at that transcript
+    /// index, without announcing it again.
+    pub(crate) fn adopt(&mut self, completed_turns: u32, open_from: Option<usize>) {
+        self.turn = self.turn.max(completed_turns);
+        if let Some(start) = open_from
+            && self.open.is_none()
+        {
+            tracing::debug!(
+                target: "tinyagents::agent_loop",
+                turn = self.turn,
+                start,
+                "[agent_loop] re-opened the in-flight turn after a resume"
+            );
+            self.open = Some((self.turn, start));
+        }
+    }
+
+    /// Treats the first `len` messages as seed input if no seed was fixed yet.
+    /// A no-op once seeded, so repeated node entries never swallow appends.
+    pub(crate) fn ensure_seeded(&mut self, len: usize) {
+        if !self.seeded {
+            tracing::debug!(
+                target: "tinyagents::agent_loop",
+                seed_len = len,
+                "[agent_loop] lifecycle tracker seeded on first use"
+            );
+            *self = Self::new(len);
         }
     }
 
@@ -205,5 +242,17 @@ impl<Ctx> RunContext<Ctx> {
     /// Reports an in-place rewrite: the transcript now holds `new_len` messages.
     pub(crate) fn rebase_transcript(&mut self, new_len: usize, reason: &str) {
         self.turns.rebase(&self.events, new_len, reason);
+    }
+}
+
+impl<Ctx> RunContext<Ctx> {
+    /// See [`TurnTracker::adopt`].
+    pub(crate) fn adopt_turn_state(&mut self, completed_turns: u32, open_from: Option<usize>) {
+        self.turns.adopt(completed_turns, open_from);
+    }
+
+    /// Fixes the lifecycle seed at `len` messages unless one is already set.
+    pub(crate) fn ensure_turn_tracker_seeded(&mut self, len: usize) {
+        self.turns.ensure_seeded(len);
     }
 }

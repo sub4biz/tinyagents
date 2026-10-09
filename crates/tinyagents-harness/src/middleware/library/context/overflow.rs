@@ -225,7 +225,7 @@ impl ContextCompressionMiddleware {
         );
         let started = std::time::Instant::now();
         let record = match self
-            .summarize_batch(&to_summarize, &to_keep, previous_summary)
+            .summarize_batch(ctx, &to_summarize, &to_keep, previous_summary)
             .await
         {
             Ok(record) => record,

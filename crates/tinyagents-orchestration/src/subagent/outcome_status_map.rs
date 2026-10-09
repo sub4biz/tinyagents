@@ -56,8 +56,7 @@ impl TryFrom<&SubagentOutcomeKind> for SubAgentJobStatus {
 }
 
 /// `AwaitingInput` is a pause, not a completion, and fails with
-/// [`NoEquivalentStatus`]. (The completion router separately declines to record
-/// a `Cancelled` outcome; that is a routing policy, not a mapping gap.)
+/// [`NoEquivalentStatus`]; that is also why the driver never records a pause.
 impl TryFrom<&SubagentOutcomeKind> for CompletionStatus {
     type Error = NoEquivalentStatus;
 

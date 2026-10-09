@@ -528,3 +528,84 @@ async fn a_cache_hit_followed_by_an_after_model_error_does_not_claim_the_provide
     assert!(partial.error.is_some());
     assert!(!partial.run.terminal.expect("outcome").provider_started);
 }
+
+// --- provider_started for a summarizer that failed without usage ---------
+
+struct RejectingSummarizer;
+
+#[async_trait]
+impl crate::summarization::Summarizer for RejectingSummarizer {
+    async fn summarize(
+        &self,
+        _: &[Message],
+    ) -> crate::error::Result<crate::summarization::SummaryRecord> {
+        Err(TinyAgentsError::Validation(
+            "rejected before dispatch".into(),
+        ))
+    }
+}
+
+fn long_input() -> Vec<Message> {
+    let mut input = vec![Message::system("sys")];
+    for i in 0..12 {
+        input.push(Message::user(format!("question {i} {}", "x".repeat(400))));
+        input.push(Message::Assistant(AssistantMessage {
+            id: None,
+            content: vec![ContentBlock::Text(format!(
+                "answer {i} {}",
+                "y".repeat(400)
+            ))],
+            tool_calls: Vec::new(),
+            usage: None,
+            origin: None,
+        }));
+    }
+    input.push(Message::user("now"));
+    input
+}
+
+fn aborting_harness(summarizer: Box<dyn crate::summarization::Summarizer>) -> AgentHarness<()> {
+    use crate::middleware::{CompressionFailurePolicy, ContextCompressionMiddleware};
+    let policy = crate::summarization::SummarizationPolicy {
+        keep_last: 2,
+        ..Default::default()
+    }
+    .with_trigger_override(100);
+    let mw = Arc::new(
+        ContextCompressionMiddleware::with_summarizer(policy, summarizer)
+            .with_failure_policy(CompressionFailurePolicy::Abort),
+    );
+    let mut harness = harness_with(Arc::new(ScriptedModel::new(vec![response(vec![], "x")])));
+    harness.push_middleware(mw.clone());
+    harness.push_model_middleware(mw);
+    harness
+}
+
+#[tokio::test]
+async fn a_summarizer_that_dispatched_and_failed_without_usage_marks_provider_started() {
+    let summarizer =
+        crate::summarization::ModelSummarizer::new(Arc::new(FailingModel("boom")), "m");
+    let harness = aborting_harness(Box::new(summarizer));
+    let ctx = RunContext::new(RunConfig::new("sum-dispatched"), ());
+    let partial = harness
+        .invoke_in_context_collecting_partial(&(), ctx, long_input())
+        .await;
+    assert!(partial.error.is_some());
+    let outcome = partial.run.terminal.expect("outcome");
+    assert!(
+        outcome.provider_started,
+        "the summarizer reached its provider"
+    );
+}
+
+#[tokio::test]
+async fn a_summarizer_rejected_before_dispatch_leaves_provider_started_false() {
+    let harness = aborting_harness(Box::new(RejectingSummarizer));
+    let ctx = RunContext::new(RunConfig::new("sum-rejected"), ());
+    let partial = harness
+        .invoke_in_context_collecting_partial(&(), ctx, long_input())
+        .await;
+    assert!(partial.error.is_some());
+    let outcome = partial.run.terminal.expect("outcome");
+    assert!(!outcome.provider_started);
+}

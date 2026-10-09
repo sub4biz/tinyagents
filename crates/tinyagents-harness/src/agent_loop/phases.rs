@@ -213,3 +213,68 @@ pub async fn execute_tool_batch<State: Send + Sync, Ctx: Send + Sync>(
         executed_tools: run.executed_tools[executed_before..].to_vec(),
     })
 }
+
+// ── Lifecycle events for alternate drivers ─────────────────────────────────
+
+/// Fixes the lifecycle seed for a driver that enters a run mid-flight (a node
+/// activation of the compiled-graph loop, possibly resumed from a checkpoint):
+/// the first `transcript_len` messages are input and are never announced.
+/// A no-op once a seed exists, so it is safe to call on every node entry.
+pub fn lifecycle_seed<Ctx>(ctx: &mut RunContext<Ctx>, transcript_len: usize) {
+    ctx.ensure_turn_tracker_seeded(transcript_len);
+}
+
+/// Announces transcript appends not yet announced (`MessageAppended`), using
+/// the harness's payload-capture policy. Mirrors the direct loop's flush
+/// points; tool calls nested inside a tool never reach the transcript, so they
+/// are never announced.
+pub fn lifecycle_flush<State: Send + Sync, Ctx: Send + Sync>(
+    harness: &AgentHarness<State, Ctx>,
+    ctx: &mut RunContext<Ctx>,
+    messages: &[Message],
+) {
+    ctx.flush_transcript(harness.policy().capture, messages);
+}
+
+/// Opens the next turn (`TurnStarted`), first announcing pending appends and
+/// closing any turn still open. Call right before the model call.
+pub fn lifecycle_start_turn<State: Send + Sync, Ctx: Send + Sync>(
+    harness: &AgentHarness<State, Ctx>,
+    ctx: &mut RunContext<Ctx>,
+    messages: &[Message],
+) -> u32 {
+    ctx.start_turn(harness.policy().capture, messages)
+}
+
+/// Announces pending appends and closes the open turn (`TurnCompleted`), if
+/// any. Idempotent: closing with no open turn only flushes.
+pub fn lifecycle_close_turn<State: Send + Sync, Ctx: Send + Sync>(
+    harness: &AgentHarness<State, Ctx>,
+    ctx: &mut RunContext<Ctx>,
+    messages: &[Message],
+) {
+    ctx.close_turn(harness.policy().capture, messages);
+}
+
+/// Reports that the transcript was truncated to `new_len` messages, emitting
+/// `MessageRetracted` for each announced message removed (highest index first).
+/// A driver whose node discards its state (an interrupt re-runs the node from
+/// its entry state) calls this so a mirror stays consistent with the transcript
+/// that will actually be kept.
+pub fn lifecycle_retract<Ctx>(ctx: &mut RunContext<Ctx>, new_len: usize) {
+    ctx.retract_transcript(new_len);
+}
+
+/// Re-aligns the lifecycle tracker with a run entered mid-flight (resumed from a
+/// checkpoint in a fresh runtime, whose tracker starts at zero): turn numbering
+/// continues from `completed_turns`, and when `open_turn_start` is `Some(index)`
+/// and no turn is open, the in-flight turn that began at that transcript index
+/// is re-opened (not announced again) so the next close reports it. Never moves
+/// numbering backwards, so it is safe to call on every node entry.
+pub fn lifecycle_resume<Ctx>(
+    ctx: &mut RunContext<Ctx>,
+    completed_turns: u32,
+    open_turn_start: Option<usize>,
+) {
+    ctx.adopt_turn_state(completed_turns, open_turn_start);
+}
