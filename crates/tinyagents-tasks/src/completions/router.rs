@@ -338,13 +338,13 @@ impl CompletionRouter {
         for id in task_ids {
             let id = id.as_ref();
             state.leased.remove(id);
-            if let Some(mut record) = self.store.get(id) {
-                if record.state == CompletionState::Pending {
-                    record.state = CompletionState::Delivered;
-                    record.updated_at = SystemTime::now();
-                    self.store.put(&record)?;
-                    changed += 1;
-                }
+            if let Some(mut record) = self.store.get(id)
+                && record.state == CompletionState::Pending
+            {
+                record.state = CompletionState::Delivered;
+                record.updated_at = SystemTime::now();
+                self.store.put(&record)?;
+                changed += 1;
             }
         }
         tracing::debug!(changed, "{LOG_PREFIX} delivered");

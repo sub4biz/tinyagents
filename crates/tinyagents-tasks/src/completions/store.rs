@@ -276,10 +276,10 @@ impl CompletionStore for JsonlCompletionStore {
                     .map_err(|e| store_err("sync compaction file", e))?;
             }
             std::fs::rename(&tmp, &self.path).map_err(|e| store_err("swap compacted log", e))?;
-            if let Some(dir) = self.path.parent().filter(|p| !p.as_os_str().is_empty()) {
-                if let Ok(dir) = std::fs::File::open(dir) {
-                    let _ = dir.sync_all();
-                }
+            if let Some(dir) = self.path.parent().filter(|p| !p.as_os_str().is_empty())
+                && let Ok(dir) = std::fs::File::open(dir)
+            {
+                let _ = dir.sync_all();
             }
             *file = open_append(&self.path)?;
             let keep: std::collections::HashSet<String> =
