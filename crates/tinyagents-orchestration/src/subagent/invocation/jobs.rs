@@ -17,7 +17,7 @@ use tinytools::{Tool, ToolResult};
 
 use crate::subagent::{AppliedResult, IncompleteKind};
 
-use tinyagents_tasks::{DetachedTaskRegistry, DetachedTaskRegistryError};
+use tinyagents_tasks::DetachedTaskRegistryError;
 use tokio::sync::watch;
 
 use super::types::{JobControl, JobMeta};
@@ -66,7 +66,7 @@ impl SubAgentJobRegistry {
 
     /// The detached-task registry that owns this registry's live state.
     #[cfg(test)]
-    pub(crate) fn tasks(&self) -> &DetachedTaskRegistry<JobMeta, SubAgentJob> {
+    pub(crate) fn tasks(&self) -> &tinyagents_tasks::DetachedTaskRegistry<JobMeta, SubAgentJob> {
         &self.tasks
     }
 
