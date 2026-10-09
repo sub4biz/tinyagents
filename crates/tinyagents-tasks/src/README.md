@@ -186,7 +186,7 @@ is unchanged.
 keeps its own (unchanged) wire format and converts to and from it. `From` is
 total; `TryFrom` fails with `NoEquivalentStatus`. `DetachedSubagentStatus`
 carries a payload (output, question, error), so it only converts out, by
-reference.
+reference (`From<&DetachedSubagentStatus>`, and `TryFrom<&_>` for `CompletionStatus`/`SubAgentJobStatus`); there is no reverse conversion because the payload cannot be reconstructed from a bare status.
 
 | Type (crate) | -> `OrchestrationTaskStatus` | `OrchestrationTaskStatus` -> |
 | --- | --- | --- |
@@ -195,7 +195,7 @@ reference.
 | `SubagentOutcomeKind` (orchestration) | `From<&_>`: `AwaitingInput` -> `Awaiting`; `Incomplete` + `Timeout` -> `TimedOut`, other `Incomplete` -> `Failed` | none (payload) |
 | `AgentRunStatus` (session) | `From`: `AwaitingUser`, `Paused` -> `Awaiting`; `Interrupted` -> `Abandoned` | `From`: `CancelRequested` -> `Running`; `TimedOut` -> `Failed`; `Abandoned` -> `Interrupted`; `Awaiting` -> `AwaitingUser` |
 | `TranscriptSubagentStatus` (session) | `From`: `Incomplete` -> `Failed`; `Interrupted` -> `Abandoned` | `TryFrom`: live states -> `Running`; `TimedOut` -> `Incomplete`; `Abandoned` -> `Interrupted`; `Cancelled` -> error |
-| `CompletionStatus` (tasks) | `From`: `Success` -> `Completed`; `Incomplete` -> `Failed` | `TryFrom`: `TimedOut`, `Abandoned` -> `Incomplete`; live states -> error |
+| `CompletionStatus` (tasks) | `From`: `Success` -> `Completed`; `Incomplete` -> `Failed` | `TryFrom`: `Completed` -> `Success`, `Failed` -> `Failed`, `Cancelled` -> `Cancelled`, `TimedOut`, `Abandoned` -> `Incomplete`; live states (`Pending`, `Running`, `Awaiting`, `CancelRequested`) -> error |
 
 The other pairs convert directly where both sides have a meaningful value:
 `SubAgentJobStatus` <-> `AgentRunStatus` (`From` out, `TryFrom` back; `Incomplete`
