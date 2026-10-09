@@ -4,8 +4,10 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use tinyagents_tasks::CompletionRouter;
 use tokio::sync::{Mutex as AsyncMutex, Notify};
 
+use super::completion::{CompletionOrigin, deliver};
 use super::policy::{AttemptSource, apply_outcome_policies, may_retry};
 use super::{IncompleteKind, SpawnAdmission, SpawnRejection, SubagentIncomplete, restrict_tools};
 use super::{
@@ -44,6 +46,7 @@ pub struct SubagentDriver<C: Send + 'static = (), H: Send + 'static = ()> {
     terminal_outcomes: AsyncMutex<HashMap<SubagentTaskKey, SubagentOutcome>>,
     in_flight: Arc<Mutex<HashMap<SubagentTaskKey, Arc<InFlight>>>>,
     admission: SpawnAdmission,
+    completions: Option<Arc<CompletionRouter>>,
 }
 
 /// Result shared by callers that arrived while the same task was executing.
@@ -156,7 +159,23 @@ impl<C: Send + 'static, H: Send + 'static> SubagentDriver<C, H> {
             terminal_outcomes: AsyncMutex::new(HashMap::new()),
             in_flight: Arc::new(Mutex::new(HashMap::new())),
             admission: SpawnAdmission::default(),
+            completions: None,
         })
+    }
+
+    /// Records every child this driver finishes with `router`, so its parent is
+    /// told according to the child's
+    /// [`NotifyMode`](tinyagents_tasks::NotifyMode).
+    ///
+    /// Only the invocation that wins the durable terminal write records, so a
+    /// coalesced follower or a replayed terminal never produces a second
+    /// completion. A cancellation is not recorded (the parent asked for it) and
+    /// neither is a pause (the same task completes later). A failure to record
+    /// is logged and never fails the run. Without this call the driver behaves
+    /// exactly as before.
+    pub fn with_completion_router(mut self, router: Arc<CompletionRouter>) -> Self {
+        self.completions = Some(router);
+        self
     }
 
     /// Enforces spawn limits on every lifecycle this driver launches.
@@ -369,6 +388,10 @@ impl<C: Send + 'static, H: Send + 'static> SubagentDriver<C, H> {
 
         let policy = prepared.policy.clone();
         let result_policy = prepared.result_policy.clone();
+        let completion_origin = self
+            .completions
+            .as_ref()
+            .map(|_| CompletionOrigin::new(&task_key, &prepared));
         let mut attempts = AttemptSource::from_prepared(&prepared);
         let mut attempt = 0usize;
         let mut execution = SubagentExecution {
@@ -448,10 +471,24 @@ impl<C: Send + 'static, H: Send + 'static> SubagentDriver<C, H> {
             }
             Err(SubagentError::Cancelled) => SubagentOutcome::cancelled(task_id),
             Err(_) if cancellation.is_cancelled() => SubagentOutcome::cancelled(task_id),
-            Err(error) => return Err(error),
+            Err(error) => {
+                if let (Some(router), Some(origin)) = (&self.completions, &completion_origin) {
+                    deliver(router, origin.record_for_error(&error)).await;
+                }
+                return Err(error);
+            }
         };
-        self.persist(task_key, outcome, expected_pause, &cancellation)
-            .await
+        let result = self
+            .persist(task_key, outcome, expected_pause, &cancellation)
+            .await?;
+        if let (Some(router), Some(origin)) = (&self.completions, &completion_origin) {
+            if result.should_emit_host_effects() {
+                if let Some(record) = origin.record_for_outcome(&result.outcome) {
+                    deliver(router, record).await;
+                }
+            }
+        }
+        Ok(result)
     }
 
     async fn persist_cancelled(

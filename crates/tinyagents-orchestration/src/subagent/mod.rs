@@ -10,6 +10,7 @@
 //! TinyAgents layers must not depend on this module.
 
 mod admission;
+mod completion;
 mod detached;
 mod driver;
 mod executor;
@@ -64,6 +65,10 @@ pub use types::{
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod test;
+
+#[cfg(test)]
+#[path = "driver_completion_tests.rs"]
+mod driver_completion_test;
 
 #[cfg(test)]
 #[path = "driver_policy_tests.rs"]
