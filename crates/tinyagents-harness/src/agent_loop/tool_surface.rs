@@ -105,13 +105,20 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
                 .collect();
         let promoted_names: BTreeSet<String> = promoted_schemas.keys().cloned().collect();
         let recorded_promotions = promoted_names.clone();
-        let bridge_listed = matches!(
-            gate.admits_intrinsic(
-                crate::tool::discover::TOOL_SEARCH_NAME,
-                tinytools::Surface::Catalog
-            ),
-            crate::tool::CallGate::Admit(_)
-        );
+        // Listed only when a call to it would be answered: hidden or denied
+        // on the catalogue, or approval-gated (the bridge is answered in place
+        // and cannot be deferred to an approver), keeps it off the wire.
+        let search = crate::tool::discover::TOOL_SEARCH_NAME;
+        let answerable = |surface| {
+            matches!(
+                gate.admits_intrinsic(search, surface),
+                crate::tool::CallGate::Admit(
+                    tinytools::ApprovalDirective::Default | tinytools::ApprovalDirective::Waived
+                )
+            )
+        };
+        let bridge_listed =
+            answerable(tinytools::Surface::Catalog) && answerable(tinytools::Surface::Call);
         if bridge_listed && !deferred_catalog.is_empty() {
             // A host-registered `tool_search` keeps its slot: the intrinsic
             // bridge only fills a name nobody registered. Check the full

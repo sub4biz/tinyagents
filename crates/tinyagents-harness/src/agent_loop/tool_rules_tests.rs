@@ -527,13 +527,17 @@ async fn a_require_approval_rule_on_tool_search_refuses_discovery() {
     let policy = ToolRulePolicy::new(rules(json!({ "rules": [
         { "effect": "require_approval", "match": { "name": "tool_search" } },
     ] })));
-    let mut harness = harness_with(model, policy);
+    let mut harness = harness_with(model.clone(), policy);
     harness.register_tool(RuleTool::deferred("deferred_open"));
 
     let run = run(&harness, "search-approval").await;
 
     let answer = tool_text(&run.messages, "s1");
     assert!(answer.contains("requires approval"), "{answer}");
+    assert!(
+        !tool_names(&model.requests()[0]).contains(&"tool_search".to_string()),
+        "an approval-gated bridge is not advertised"
+    );
     assert!(!answer.contains("deferred_open"), "{answer}");
 }
 
