@@ -29,6 +29,10 @@ pub(crate) struct TurnTracker {
     turn: u32,
     /// The open turn and the transcript index it started at.
     open: Option<(u32, usize)>,
+    /// Whether the seed has been fixed. A context that never went through
+    /// [`TurnTracker::new`] (a graph run entered mid-flight) is seeded on first
+    /// use by [`TurnTracker::ensure_seeded`].
+    seeded: bool,
 }
 
 pub(crate) fn role_of(message: &Message) -> &'static str {
@@ -50,6 +54,20 @@ impl TurnTracker {
             seed_len,
             turn: 0,
             open: None,
+            seeded: true,
+        }
+    }
+
+    /// Treats the first `len` messages as seed input if no seed was fixed yet.
+    /// A no-op once seeded, so repeated node entries never swallow appends.
+    pub(crate) fn ensure_seeded(&mut self, len: usize) {
+        if !self.seeded {
+            tracing::debug!(
+                target: "tinyagents::agent_loop",
+                seed_len = len,
+                "[agent_loop] lifecycle tracker seeded on first use"
+            );
+            *self = Self::new(len);
         }
     }
 
@@ -205,5 +223,12 @@ impl<Ctx> RunContext<Ctx> {
     /// Reports an in-place rewrite: the transcript now holds `new_len` messages.
     pub(crate) fn rebase_transcript(&mut self, new_len: usize, reason: &str) {
         self.turns.rebase(&self.events, new_len, reason);
+    }
+}
+
+impl<Ctx> RunContext<Ctx> {
+    /// Fixes the lifecycle seed at `len` messages unless one is already set.
+    pub(crate) fn ensure_turn_tracker_seeded(&mut self, len: usize) {
+        self.turns.ensure_seeded(len);
     }
 }

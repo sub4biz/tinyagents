@@ -213,3 +213,45 @@ pub async fn execute_tool_batch<State: Send + Sync, Ctx: Send + Sync>(
         executed_tools: run.executed_tools[executed_before..].to_vec(),
     })
 }
+
+// ── Lifecycle events for alternate drivers ─────────────────────────────────
+
+/// Fixes the lifecycle seed for a driver that enters a run mid-flight (a node
+/// activation of the compiled-graph loop, possibly resumed from a checkpoint):
+/// the first `transcript_len` messages are input and are never announced.
+/// A no-op once a seed exists, so it is safe to call on every node entry.
+pub fn lifecycle_seed<Ctx>(ctx: &mut RunContext<Ctx>, transcript_len: usize) {
+    ctx.ensure_turn_tracker_seeded(transcript_len);
+}
+
+/// Announces transcript appends not yet announced (`MessageAppended`), using
+/// the harness's payload-capture policy. Mirrors the direct loop's flush
+/// points; tool calls nested inside a tool never reach the transcript, so they
+/// are never announced.
+pub fn lifecycle_flush<State: Send + Sync, Ctx: Send + Sync>(
+    harness: &AgentHarness<State, Ctx>,
+    ctx: &mut RunContext<Ctx>,
+    messages: &[Message],
+) {
+    ctx.flush_transcript(harness.policy().capture, messages);
+}
+
+/// Opens the next turn (`TurnStarted`), first announcing pending appends and
+/// closing any turn still open. Call right before the model call.
+pub fn lifecycle_start_turn<State: Send + Sync, Ctx: Send + Sync>(
+    harness: &AgentHarness<State, Ctx>,
+    ctx: &mut RunContext<Ctx>,
+    messages: &[Message],
+) -> u32 {
+    ctx.start_turn(harness.policy().capture, messages)
+}
+
+/// Announces pending appends and closes the open turn (`TurnCompleted`), if
+/// any. Idempotent: closing with no open turn only flushes.
+pub fn lifecycle_close_turn<State: Send + Sync, Ctx: Send + Sync>(
+    harness: &AgentHarness<State, Ctx>,
+    ctx: &mut RunContext<Ctx>,
+    messages: &[Message],
+) {
+    ctx.close_turn(harness.policy().capture, messages);
+}

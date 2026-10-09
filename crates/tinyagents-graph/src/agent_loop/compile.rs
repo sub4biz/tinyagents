@@ -137,8 +137,10 @@ where
                 let rt = rt.clone();
                 async move {
                     let harness = rt.harness.clone();
+                    let mut ctx_guard = rt.ctx.lock().await;
                     let mut run_guard = rt.run.lock().await;
-                    runtime::settle_node(&harness, &mut run_guard, loop_state).await
+                    runtime::settle_node(&harness, &mut ctx_guard, &mut run_guard, loop_state)
+                        .await
                 }
             }
         })

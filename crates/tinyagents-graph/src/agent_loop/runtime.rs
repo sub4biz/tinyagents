@@ -209,6 +209,10 @@ where
     if ctx.cancellation.is_cancelled() {
         return Err(TinyAgentsError::Cancelled);
     }
+    // Everything on the transcript when the loop is first entered is input (or
+    // a resumed run's already-announced history); only later appends are
+    // announced. A no-op after the first activation.
+    phases::lifecycle_seed(ctx, loop_state.messages.len());
     match apply_pending_steering(ctx, &mut loop_state.messages)? {
         SteeringOutcome::Cancel => return Err(TinyAgentsError::Cancelled),
         SteeringOutcome::Pause => {
@@ -432,6 +436,15 @@ where
     status.active_model_call = Some(call_id.clone());
     ctx.active_model_call = Some(call_id.clone());
     ctx.begin_model_call();
+    // Same point as the direct loop: pending appends (steering) are announced,
+    // the previous turn closed, and this one opened, just before the call.
+    let turn = phases::lifecycle_start_turn(harness, ctx, &loop_state.messages);
+    tracing::debug!(
+        target: "tinyagents::agent_loop",
+        run_id = %ctx.run_id(),
+        turn,
+        "[graph_loop] turn started"
+    );
 
     let base = DirectModelBase {
         model: binding.model.as_ref(),
@@ -488,6 +501,7 @@ where
             response.message.clone(),
         ));
     loop_state.turn += 1;
+    phases::lifecycle_flush(harness, ctx, &loop_state.messages);
 
     let tool_calls = response.tool_calls().to_vec();
     loop_state.pending_tool_calls = tool_calls.clone();
@@ -572,6 +586,9 @@ where
         }
         Err(error) => return Err(error),
     };
+    // Every tool result of this batch is on the transcript: announce them and
+    // close the turn, as the direct loop does after its batch.
+    phases::lifecycle_close_turn(harness, ctx, &loop_state.messages);
     loop_state.tool_calls = run.tool_calls;
     loop_state.executed_tools = run.executed_tools.clone();
     let _ = outcome;
@@ -592,6 +609,7 @@ where
 /// (`RunPolicy::output_retry`), and finishes the run.
 pub(crate) async fn settle_node<State, Ctx>(
     harness: &AgentHarness<State, Ctx>,
+    ctx: &mut RunContext<Ctx>,
     run: &mut AgentRun,
     mut loop_state: LoopState,
 ) -> Result<NodeResult<LoopState>>
@@ -599,6 +617,10 @@ where
     State: Send + Sync,
     Ctx: Send + Sync,
 {
+    // The final assistant message is the last append of its turn; close the
+    // turn before any output-retry prompt is pushed (that prompt is announced
+    // with the next turn's start).
+    phases::lifecycle_close_turn(harness, ctx, &loop_state.messages);
     if let Some(plan) = loop_state.pending_structured.take() {
         let extractor = StructuredExtractor::new(
             plan.strategy.clone(),
