@@ -502,7 +502,13 @@ async fn normalized_arguments_are_checked_against_the_rules_again() {
         { "id": "no-delete", "effect": "deny", "match": { "name": "*_delete_*" } },
     ] })));
     let execute = RuleTool::dispatcher("execute");
-    let mut harness = harness_with(model, policy);
+    let mut harness: AgentHarness<()> = AgentHarness::new();
+    harness.register_model("scripted", model as _);
+    harness.with_policy(RunPolicy {
+        invalid_args: crate::runtime::InvalidArgsPolicy::NormalizeThenReturnToolError,
+        tool_rules: policy,
+        ..RunPolicy::default()
+    });
     harness.register_tool(execute.clone());
 
     let run = run(&harness, "normalized").await;
