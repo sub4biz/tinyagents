@@ -159,11 +159,15 @@ async fn fatal_worker_error_keeps_its_original_message() {
 async fn pre_cancelled_step_reports_cancelled_without_running() {
     let token = CancellationToken::new();
     token.cancel();
-    let err = run_agent_step(&AgentStepConfig::default(), ident("a"), token, |_| {
+    let ran = Arc::new(AtomicU32::new(0));
+    let seen = ran.clone();
+    let err = run_agent_step(&AgentStepConfig::default(), ident("a"), token, move |_| {
+        seen.fetch_add(1, Ordering::SeqCst);
         ok_text("x")
     })
     .await
     .err()
     .unwrap();
     assert!(matches!(err, AgentStepError::Cancelled));
+    assert_eq!(ran.load(Ordering::SeqCst), 0, "the worker never ran");
 }

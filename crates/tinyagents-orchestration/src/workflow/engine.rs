@@ -663,7 +663,7 @@ where
         let mut spawned = 0_u32;
         for outcome in outcomes.outcomes {
             match outcome.result {
-                Ok(result) => {
+                Ok((result, annotations)) => {
                     spawned += 1;
                     // The executor registered the real id before it could
                     // await completion. Keep older executors harmlessly
@@ -671,13 +671,17 @@ where
                     if !child_ids.iter().any(|id| id == &result.child_id) {
                         child_ids.push(result.child_id.clone());
                     }
-                    outputs.push(json!({
+                    let mut entry = json!({
                         // Preserve the persisted/RPC v1 projection while the
                         // v2 metadata remains lossless for engine consumers.
                         "agentId": phase.agent_ids[outcome.index],
                         "output": render_compat_output(&result.output),
                         "metadata": { "version": 2, "rawOutput": result.output },
-                    }));
+                    });
+                    if let Some(annotations) = annotations {
+                        entry["metadata"]["resultPolicy"] = annotations;
+                    }
+                    outputs.push(entry);
                 }
                 Err(error) if failure.is_none() => failure = Some(error),
                 Err(_) => {}

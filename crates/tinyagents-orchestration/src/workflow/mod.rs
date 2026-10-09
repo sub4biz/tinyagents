@@ -27,4 +27,4 @@ pub use types::{
 pub use validate::{validate_agents, validate_structure};
 
 #[cfg(test)]
-pub(crate) mod tests;
+mod tests;

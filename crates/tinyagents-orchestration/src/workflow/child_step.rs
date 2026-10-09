@@ -13,7 +13,7 @@ use super::engine::{
     WorkflowExecutor, render_compat_output,
 };
 use crate::subagent::{
-    AgentStepConfig, AgentStepIdentity, IncompleteKind, StepSuccess, SubagentOutcomeKind,
+    AgentStepConfig, AgentStepIdentity, IncompleteKind, StepSuccess, SubagentOutcome, SubagentOutcomeKind,
     run_agent_step,
 };
 
@@ -39,7 +39,7 @@ pub(super) async fn run_child_step<E: WorkflowExecutor + 'static>(
     request: WorkflowChildRequest,
     cancel: CancellationToken,
     registration: Arc<dyn WorkflowChildRegistration>,
-) -> Result<WorkflowChildResult, OrchestrationError> {
+) -> Result<(WorkflowChildResult, Option<Value>), OrchestrationError> {
     let identity = AgentStepIdentity::new(
         request.run_id.clone(),
         format!("{}:{}", request.phase, request.index_in_phase),
@@ -84,9 +84,9 @@ pub(super) async fn run_child_step<E: WorkflowExecutor + 'static>(
                 // Keep the executor's structured output unless the result
                 // policy actually changed the text.
                 if step.outcome.output != render_compat_output(&child.output) {
-                    child.output = Value::String(step.outcome.output);
+                    child.output = Value::String(step.outcome.output.clone());
                 }
-                Ok(child)
+                Ok((child, result_policy_annotations(&step.outcome)))
             }
             SubagentOutcomeKind::Incomplete(incomplete) => {
                 tracing::debug!(
@@ -106,12 +106,11 @@ pub(super) async fn run_child_step<E: WorkflowExecutor + 'static>(
                 }
                 Err(OrchestrationError(incomplete.reason))
             }
-            // The engine re-checks its own token after the fan-out and treats
-            // the phase as interrupted; hand it the real result when there is
-            // one so the registered child id is not lost.
-            SubagentOutcomeKind::Cancelled => step
-                .value
-                .ok_or_else(|| OrchestrationError("workflow child cancelled".to_owned())),
+            // The child registered its id before it could be cancelled, so the
+            // engine keeps it (via the registration) without a result.
+            SubagentOutcomeKind::Cancelled => {
+                Err(OrchestrationError("workflow child cancelled".to_owned()))
+            }
             SubagentOutcomeKind::AwaitingInput(_) => Err(OrchestrationError(
                 "workflow child paused for input".to_owned(),
             )),
@@ -126,6 +125,23 @@ pub(super) async fn run_child_step<E: WorkflowExecutor + 'static>(
             Err(OrchestrationError(error.to_string()))
         }
     }
+}
+
+/// Result-policy findings (schema check, artifact overflow) the driver
+/// recorded on the outcome, for the phase output metadata. `None` when the
+/// policy had nothing to report.
+fn result_policy_annotations(outcome: &SubagentOutcome) -> Option<Value> {
+    if outcome.schema_error.is_none()
+        && outcome.artifact_error.is_none()
+        && outcome.artifacts.is_empty()
+    {
+        return None;
+    }
+    Some(serde_json::json!({
+        "schemaError": outcome.schema_error,
+        "artifactError": outcome.artifact_error,
+        "artifacts": outcome.artifacts,
+    }))
 }
 
 #[cfg(test)]
