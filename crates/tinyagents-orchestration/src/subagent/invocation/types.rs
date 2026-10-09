@@ -12,14 +12,15 @@
 //! sibling `mod.rs` and its `*_tests.rs` files.
 
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex};
 
 use serde_json::Value;
 
-use tinyagents_harness::cancel::CancellationToken;
 use tinyagents_harness::events::EventSink;
 use tinyagents_harness::runtime::AgentHarness;
-use tinyagents_harness::steering::{RecentRequestIds, SteeringHandle};
+use tokio::sync::watch;
+
+use tinyagents_tasks::{DetachedTaskRegistry, SteeringRegistry};
 use tinyinference_llm::message::Message;
 
 /// The argument key a [`SubAgentTool`] reads the child input from.
@@ -285,23 +286,46 @@ pub(crate) struct JobLink {
 }
 
 /// Shared registry behind asynchronous subagent spawning and host controls.
-#[derive(Clone, Default)]
+///
+/// This is a thin adapter over [`tinyagents_tasks::DetachedTaskRegistry`], the
+/// one live detached-task registry implementation. The registry holds each
+/// job's [`SubAgentJob`] snapshot as its watched status (so ownership,
+/// snapshots, steering lookup and request-id dedupe are the detached
+/// registry's), registered cooperatively because a job is stopped through its
+/// own cancellation token rather than hard-aborted. The adapter adds only what
+/// is specific to subagent jobs: the lifecycle transitions, the
+/// cancel-then-settle protocol, and retention of settled jobs.
+#[derive(Clone)]
 pub struct SubAgentJobRegistry {
-    pub(crate) inner: Arc<RwLock<HashMap<SubAgentJobId, SubAgentJobEntry>>>,
+    pub(crate) tasks: DetachedTaskRegistry<JobMeta, SubAgentJob>,
+    pub(crate) steering: SteeringRegistry,
+    /// Status senders and cancel flags. Also the transition gate: every
+    /// mutation holds this lock, so a settle and a cancel never interleave.
+    pub(crate) controls: Arc<Mutex<HashMap<SubAgentJobId, JobControl>>>,
 }
 
-pub(crate) struct SubAgentJobEntry {
-    pub(crate) job: SubAgentJob,
-    /// Identity of the parent run that created this capability.
-    pub(crate) owner: u64,
-    pub(crate) steering: SteeringHandle,
-    /// The child run's own cancellation token (a linked child of the parent's),
-    /// so one job can be cancelled without touching the parent or siblings.
-    ///
-    /// `None` once the job is terminal: a settled job holds no live token.
-    pub(crate) cancellation: Option<CancellationToken>,
-    /// Message `request_id`s already applied, so a retried message is queued once.
-    pub(crate) message_requests: RecentRequestIds,
+impl Default for SubAgentJobRegistry {
+    fn default() -> Self {
+        let steering = SteeringRegistry::new();
+        Self {
+            // Settled jobs must stay queryable, so the soft cap that makes the
+            // detached registry sweep terminal entries is never reached.
+            tasks: DetachedTaskRegistry::new(steering.clone(), usize::MAX, |job: &SubAgentJob| {
+                job.status.is_terminal()
+            }),
+            steering,
+            controls: Arc::default(),
+        }
+    }
+}
+
+/// Application metadata kept with each job in the detached registry.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct JobMeta;
+
+/// The adapter-owned half of a job: the status publisher and cancel flag.
+pub(crate) struct JobControl {
+    pub(crate) status: watch::Sender<SubAgentJob>,
     /// Whether cancellation was requested while the child was still running.
     /// The job remains non-terminal until the child reports its result.
     pub(crate) cancellation_requested: bool,
