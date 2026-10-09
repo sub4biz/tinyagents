@@ -382,6 +382,20 @@ impl Tool for OverrideTool {
             .unwrap_or_else(|| self.inner.exposure())
     }
 
+    // A renamed or prefixed tool is still the same tool to the host's tool
+    // rules: keep its family, tags and indirect target.
+    fn family(&self) -> Option<&str> {
+        self.inner.family()
+    }
+
+    fn tags(&self) -> Vec<String> {
+        self.inner.tags()
+    }
+
+    fn indirect_target(&self, args: &Value) -> Option<tinytools::ToolSubject> {
+        self.inner.indirect_target(args)
+    }
+
     fn is_concurrency_safe(&self, args: &Value) -> bool {
         self.inner.is_concurrency_safe(args)
     }
