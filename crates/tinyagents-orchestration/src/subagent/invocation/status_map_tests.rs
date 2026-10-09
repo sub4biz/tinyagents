@@ -124,3 +124,104 @@ fn task_to_job_error_names_the_source_status() {
         "status `awaiting` has no equivalent in SubAgentJobStatus"
     );
 }
+
+#[test]
+fn job_status_golden_wire_round_trips() {
+    // `SubAgentJob` snapshots serialize these exact strings.
+    let golden = [
+        (Job::Queued, "queued"),
+        (Job::Running, "running"),
+        (Job::Completed, "completed"),
+        (Job::Failed, "failed"),
+        (Job::Incomplete, "incomplete"),
+        (Job::Cancelled, "cancelled"),
+    ];
+    assert_eq!(golden.len(), ALL_JOBS.len());
+    for (job, wire) in golden {
+        assert_eq!(serde_json::to_value(job).unwrap(), serde_json::json!(wire));
+        let back: Job = serde_json::from_value(serde_json::json!(wire)).unwrap();
+        assert_eq!(back, job);
+    }
+}
+
+#[test]
+fn job_snapshot_golden_json_round_trips() {
+    let old = serde_json::json!({
+        "id": "job-1",
+        "agent": "researcher",
+        "status": "incomplete",
+        "incomplete_kind": "timeout"
+    });
+    let job: SubAgentJob = serde_json::from_value(old).unwrap();
+    assert_eq!(job.status, Job::Incomplete);
+    let out = serde_json::to_value(&job).unwrap();
+    assert_eq!(out["status"], "incomplete");
+    assert_eq!(out["incomplete_kind"], "timeout");
+    let again: SubAgentJob = serde_json::from_value(out).unwrap();
+    assert_eq!(again, job);
+}
+
+#[test]
+fn from_impls_agree_with_the_named_methods() {
+    for job in ALL_JOBS {
+        assert_eq!(Task::from(job), job.to_task_status());
+        assert_eq!(Run::from(job), job.to_run_status());
+    }
+}
+
+#[test]
+fn run_to_job_covers_every_run_status() {
+    let expected: [(Run, Option<Job>); 8] = [
+        (Run::Pending, Some(Job::Queued)),
+        (Run::Running, Some(Job::Running)),
+        (Run::AwaitingUser, None),
+        (Run::Paused, None),
+        (Run::Completed, Some(Job::Completed)),
+        (Run::Failed, Some(Job::Failed)),
+        (Run::Cancelled, Some(Job::Cancelled)),
+        (Run::Interrupted, None),
+    ];
+    for (run, job) in expected {
+        assert_eq!(Job::try_from(run).ok(), job, "{run:?}");
+    }
+    let err = Job::try_from(Run::Paused).unwrap_err();
+    assert_eq!(err.from_status(), "paused");
+    assert_eq!(err.target(), "SubAgentJobStatus");
+}
+
+#[test]
+fn job_run_job_round_trips_for_mappable_statuses() {
+    for job in ALL_JOBS {
+        let back = Job::try_from(Run::from(job)).unwrap();
+        match job {
+            Job::Incomplete => assert_eq!(back, Job::Failed),
+            _ => assert_eq!(back, job),
+        }
+    }
+}
+
+#[test]
+fn job_and_completion_status_convert_exhaustively() {
+    use tinyagents_tasks::CompletionStatus as Done;
+    let expected: [(Job, Option<Done>); 6] = [
+        (Job::Queued, None),
+        (Job::Running, None),
+        (Job::Completed, Some(Done::Success)),
+        (Job::Failed, Some(Done::Failed)),
+        (Job::Incomplete, Some(Done::Incomplete)),
+        (Job::Cancelled, Some(Done::Cancelled)),
+    ];
+    for (job, done) in expected {
+        assert_eq!(Done::try_from(job).ok(), done, "{job:?}");
+        assert_eq!(done.is_none(), !job.is_terminal(), "{job:?}");
+    }
+    // The reverse is total and lossless.
+    for done in [
+        Done::Success,
+        Done::Failed,
+        Done::Cancelled,
+        Done::Incomplete,
+    ] {
+        assert_eq!(Done::try_from(Job::from(done)).unwrap(), done);
+    }
+}

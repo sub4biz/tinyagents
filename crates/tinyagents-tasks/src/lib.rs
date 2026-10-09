@@ -15,14 +15,22 @@
 //! [`register_orchestration_tools`] to insert them into a
 //! [`tinyagents_harness::tool::ToolRegistry`] alongside any other tools.
 
+mod completions;
 mod reconcile;
 mod recovery;
 mod runtime;
+mod status;
 mod store;
 mod store_registry;
 mod tool;
 mod types;
 
+pub use completions::{
+    CompletionArtifact, CompletionFormatter, CompletionRecord, CompletionResult, CompletionRouter,
+    CompletionState, CompletionStatus, CompletionStore, DEFAULT_MAX_ATTEMPTS,
+    InMemoryCompletionStore, JsonlCompletionStore, NeutralCompletionFormatter, NotifyMode,
+    RecordOutcome, TombstoneOutcome,
+};
 pub use reconcile::{
     ReconcileOutcome, ReconcileReport, ReconciledTask, reconcile_orphaned_tasks, task_status_label,
 };

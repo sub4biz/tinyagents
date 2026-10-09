@@ -27,3 +27,5 @@ for display.
 Transcript reads are best-effort over append-only JSONL sources. Malformed or
 unreadable candidates are skipped with diagnostics. Keep pagination cursors
 stable and do not treat a cache hit as an authorization decision.
+
+`status_map.rs` expresses `TranscriptSubagentStatus` in terms of the canonical `OrchestrationTaskStatus` (`From` in, `TryFrom` out; `Cancelled` has no projection). Its serialized strings are unchanged. Mapping table: `tinyagents-tasks` README.

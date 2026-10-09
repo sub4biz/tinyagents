@@ -31,7 +31,7 @@ pub enum ToolCallStatus {
 /// Not to be confused with the driver's `SubagentOutcomeKind` in
 /// `tinyagents-orchestration` (the live outcome a subagent run reports); this
 /// is the display projection of what a persisted transcript recorded. See the
-/// status-vocabulary map in the orchestration crate README.
+/// status-vocabulary map in the orchestration `tinyagents-tasks` README.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TranscriptSubagentStatus {

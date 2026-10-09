@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use tinyagents_harness::{CancellationToken, context::RunContext};
 use tinyagents_runtime::ToolSnapshot;
+use tinyagents_tasks::NotifyMode;
 use tinyinference_llm::{message::Message, usage::UsageTotals};
 
 use super::{ResultPolicy, SubAgentPolicy, SubagentRole};
@@ -252,6 +253,16 @@ pub struct PreparedSubagent<C = ()> {
     /// Mints a fresh run context for each retry attempt (a context is consumed
     /// by its run). Without it the driver cannot retry and runs one attempt.
     pub retry_context: Option<AttemptContextFactory<C>>,
+    /// How the parent hears about this child's completion when the driver has a
+    /// [`CompletionRouter`](tinyagents_tasks::CompletionRouter). `None` (the
+    /// default) records nothing, so a foreground child whose result already
+    /// returns to the parent is never pushed a second time. A detached spawn
+    /// sets `Some(NotifyMode::default())` (follow-up) or another mode.
+    pub notify_mode: Option<NotifyMode>,
+    /// The parent key completions are routed under; defaults to the request's
+    /// thread id, else the parent run id. Set it when the host's parent
+    /// identity is neither (a session key, say).
+    pub completion_parent: Option<String>,
 }
 
 /// Builds the run context for retry attempt `n` (`1` is the first retry).
@@ -279,7 +290,21 @@ impl<C> PreparedSubagent<C> {
             policy: SubAgentPolicy::default(),
             result_policy: ResultPolicy::default(),
             retry_context: None,
+            notify_mode: None,
+            completion_parent: None,
         }
+    }
+
+    /// Sets how the parent is told when this child finishes.
+    pub fn with_notify_mode(mut self, mode: NotifyMode) -> Self {
+        self.notify_mode = Some(mode);
+        self
+    }
+
+    /// Sets the parent key the completion is routed under.
+    pub fn with_completion_parent(mut self, parent_key: impl Into<String>) -> Self {
+        self.completion_parent = Some(parent_key.into());
+        self
     }
 
     /// Sets the delegation role.
@@ -398,7 +423,7 @@ pub enum IncompleteKind {
 /// Not to be confused with the session crate's `TranscriptSubagentStatus` (a
 /// display projection read back from a transcript) or with the job / detached
 /// / task / run-ledger vocabularies; see the status-vocabulary map in the
-/// crate README. Formerly named `SubagentStatus`; the serde wire format is
+/// `tinyagents-tasks` README. Formerly named `SubagentStatus`; the serde wire format is
 /// unchanged.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum SubagentOutcomeKind {

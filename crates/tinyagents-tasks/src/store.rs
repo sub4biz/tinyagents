@@ -525,7 +525,7 @@ impl TaskStore for JsonlTaskStore {
 /// current worker before blocking it. Outside a runtime — or on a
 /// current-thread runtime, where `block_in_place` would panic — the closure
 /// runs inline.
-fn run_blocking<T>(f: impl FnOnce() -> T) -> T {
+pub(crate) fn run_blocking<T>(f: impl FnOnce() -> T) -> T {
     use tokio::runtime::{Handle, RuntimeFlavor};
     match Handle::try_current() {
         Ok(handle) if handle.runtime_flavor() == RuntimeFlavor::MultiThread => {

@@ -150,3 +150,5 @@ does not have to resubmit evidence already accepted.
 **`shutdown_agent_team_member` releases the member's in-progress tasks back
 to `todo`** (clearing claimant + token) in the same transaction that marks
 the member `stopped` — the bulk analogue of `release_agent_team_task`.
+
+`status_map.rs` holds the total `From` conversions between `AgentRunStatus` and the canonical `tinyagents_tasks::OrchestrationTaskStatus` (`Paused` reads as `Awaiting`, `Interrupted` as `Abandoned`); the `AgentRunStatus` wire strings are unchanged. Mapping table: `tinyagents-tasks` README.

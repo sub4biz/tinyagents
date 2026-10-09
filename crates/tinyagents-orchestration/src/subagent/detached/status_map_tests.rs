@@ -77,3 +77,30 @@ fn run_ledger_is_terminal_agrees_except_for_awaiting() {
         }
     }
 }
+
+#[test]
+fn from_impls_agree_with_the_named_methods() {
+    for status in all() {
+        assert_eq!(Task::from(&status), status.to_task_status());
+        assert_eq!(Run::from(&status), status.to_run_status());
+    }
+}
+
+#[test]
+fn detached_to_completion_covers_every_variant() {
+    use tinyagents_tasks::CompletionStatus as Done;
+    let expected = [None, Some(Done::Success), None, Some(Done::Failed)];
+    for (status, done) in all().iter().zip(expected) {
+        assert_eq!(Done::try_from(status).ok(), done, "{}", status.label());
+    }
+    let err = Done::try_from(&DetachedSubagentStatus::Running).unwrap_err();
+    assert_eq!(err.target(), "CompletionStatus");
+}
+
+#[test]
+fn detached_label_is_the_stable_wire_label() {
+    // `label()` is the only serialized form of a detached status (the enum
+    // itself is a live, payload-carrying type with no serde impl).
+    let labels: Vec<_> = all().iter().map(|s| s.label()).collect();
+    assert_eq!(labels, ["running", "completed", "awaiting_user", "failed"]);
+}

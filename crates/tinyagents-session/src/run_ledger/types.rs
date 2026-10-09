@@ -61,6 +61,9 @@ impl AgentRunKind {
 }
 
 /// Lifecycle status of a single [`AgentRun`].
+///
+/// Convertible to and from the canonical `tinyagents_tasks::OrchestrationTaskStatus`
+/// (see `status_map.rs`); the serialized form is unchanged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentRunStatus {
