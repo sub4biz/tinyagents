@@ -485,3 +485,65 @@ async fn a_toolset_tool_never_takes_a_denied_registered_tools_name() {
 
     assert!(!tool_names(&model.requests()[0]).contains(&"dup".to_string()));
 }
+
+#[tokio::test]
+async fn normalized_arguments_are_checked_against_the_rules_again() {
+    // A JSON-encoded object is decoded by normalization before dispatch; the
+    // final rule check sees the decoded target.
+    let model = Arc::new(ScriptedModel::new(vec![
+        calls(vec![(
+            "c1",
+            "execute",
+            Value::String("{\"action\":\"GMAIL_DELETE_EMAIL\"}".to_string()),
+        )]),
+        ModelResponse::assistant("done"),
+    ]));
+    let policy = ToolRulePolicy::new(rules(json!({ "rules": [
+        { "id": "no-delete", "effect": "deny", "match": { "name": "*_delete_*" } },
+    ] })));
+    let execute = RuleTool::dispatcher("execute");
+    let mut harness = harness_with(model, policy);
+    harness.register_tool(execute.clone());
+
+    let run = run(&harness, "normalized").await;
+
+    assert_eq!(execute.calls(), 0);
+    let text = tool_text(&run.messages, "c1");
+    assert!(text.contains("rule 'no-delete'"), "{text}");
+}
+
+#[tokio::test]
+async fn a_require_approval_rule_on_tool_search_refuses_discovery() {
+    let model = Arc::new(ScriptedModel::new(vec![
+        calls(vec![("s1", "tool_search", json!({"query": "deferred"}))]),
+        ModelResponse::assistant("done"),
+    ]));
+    let policy = ToolRulePolicy::new(rules(json!({ "rules": [
+        { "effect": "require_approval", "match": { "name": "tool_search" } },
+    ] })));
+    let mut harness = harness_with(model, policy);
+    harness.register_tool(RuleTool::deferred("deferred_open"));
+
+    let run = run(&harness, "search-approval").await;
+
+    let answer = tool_text(&run.messages, "s1");
+    assert!(answer.contains("requires approval"), "{answer}");
+    assert!(!answer.contains("deferred_open"), "{answer}");
+}
+
+#[tokio::test]
+async fn unknown_tool_recovery_does_not_point_at_a_denied_tool_search() {
+    let model = Arc::new(ScriptedModel::new(vec![
+        calls(vec![("c1", "nope", json!({}))]),
+        ModelResponse::assistant("done"),
+    ]));
+    let policy = ToolRulePolicy::new(rules(json!({ "rules": [
+        { "effect": "deny", "match": { "name": "tool_search" } },
+    ] })));
+    let mut harness = harness_with(model, policy);
+    harness.register_tool(RuleTool::deferred("deferred_open"));
+
+    let run = run(&harness, "unknown").await;
+
+    assert!(!tool_text(&run.messages, "c1").contains("tool_search"));
+}

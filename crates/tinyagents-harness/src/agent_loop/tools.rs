@@ -374,9 +374,15 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
         // `run_loop_body` — an empty declared list never falls back to
         // "unrestricted" here either.
         let gate = self.resolve_tool_gate(ctx)?;
-        if let CallGate::Refuse(message) =
-            gate.admits_intrinsic(TOOL_SEARCH_NAME, tinytools::Surface::Call)
-        {
+        let intrinsic = match gate.admits_intrinsic(TOOL_SEARCH_NAME, tinytools::Surface::Call) {
+            // The bridge is answered in place and cannot be deferred to an
+            // approver, so a rule requiring approval for discovery refuses it.
+            CallGate::Admit(tinytools::ApprovalDirective::Required) => CallGate::Refuse(format!(
+                "Tool '{TOOL_SEARCH_NAME}' requires approval by tool rules; discovery cannot be deferred."
+            )),
+            other => other,
+        };
+        if let CallGate::Refuse(message) = intrinsic {
             // Discovery itself is ruled out: refuse rather than answer, so the
             // bridge cannot reveal what the rules withhold from the model. Like
             // the other answered recoveries, the call keeps its budget slot.
@@ -701,19 +707,6 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
             status.set_last_event(record.id);
             call.arguments = repaired;
             call.invalid = None;
-            // The rules first saw an unparseable string, which names no
-            // indirect target and matches no argument condition; decide again
-            // on what will actually run.
-            match self.rule_admission(&gate, &call.name, &call.arguments) {
-                CallGate::Admit(approval) => rule_approval = rule_approval.strictest(approval),
-                CallGate::Refuse(message) => {
-                    return Ok(ResolvedToolCall::Answered(with_refusal_metadata(
-                        ctx,
-                        &call.id,
-                        tinytools::ToolResult::error(message),
-                    )));
-                }
-            }
         }
 
         // The provider marked this call's arguments unparseable (a small local
@@ -835,6 +828,14 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
                         .tools
                         .dispatch(crate::tool::discover::TOOL_SEARCH_NAME)
                         .is_none()
+                        && matches!(
+                            gate.admits_intrinsic(
+                                crate::tool::discover::TOOL_SEARCH_NAME,
+                                tinytools::Surface::Call
+                            ),
+                            CallGate::Admit(tinytools::ApprovalDirective::Default)
+                                | CallGate::Admit(tinytools::ApprovalDirective::Waived)
+                        )
                         && !self.deferred_catalog(&gate).is_empty();
                     let message = super::unknown_tool::unknown_tool_message(
                         &requested,
@@ -947,6 +948,22 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
             return Ok(ResolvedToolCall::Answered(tinytools::ToolResult::error(
                 message,
             )));
+        }
+        // Tool rules once more, on the arguments that will actually run. The
+        // early check saw the raw provider payload; repair, normalization
+        // (a JSON-encoded object decoded) or preparation can change what an
+        // indirect target or an argument condition reads, so the final
+        // decision is made here, before approval and dispatch.
+        match self.rule_admission(&gate, &call.name, &call.arguments) {
+            CallGate::Admit(approval) => rule_approval = rule_approval.strictest(approval),
+            CallGate::Refuse(message) => {
+                ctx.limits.rollback_tool_calls(1);
+                return Ok(ResolvedToolCall::Answered(with_refusal_metadata(
+                    ctx,
+                    &call.id,
+                    tinytools::ToolResult::error(message),
+                )));
+            }
         }
         // Deferral (A2), after validation so an approver only ever sees a
         // call the tool would actually accept, and before host authorization
