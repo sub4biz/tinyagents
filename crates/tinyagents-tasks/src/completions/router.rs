@@ -57,7 +57,7 @@ struct RouterState {
 
 /// Durable, deduplicating hand-off of finished children to their parents.
 ///
-/// See the [module docs](super) for the division of labour with the host. One
+/// See the `completions` module docs for the division of labour with the host. One
 /// router serves one process: its read-modify-write sequences are serialised
 /// by an in-process lock, so two processes must not share a store.
 pub struct CompletionRouter {
