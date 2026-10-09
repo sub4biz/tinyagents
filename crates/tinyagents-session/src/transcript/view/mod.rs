@@ -8,6 +8,7 @@ mod cache;
 mod project;
 mod prompt_tools;
 mod resolve;
+mod status_map;
 mod subagents;
 pub mod types;
 
