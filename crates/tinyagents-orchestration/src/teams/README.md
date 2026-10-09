@@ -26,7 +26,12 @@ completions, and inter-member messages.
   callers behave exactly as before.
 - **`run_member_graph_with` / `MemberStep`** — the same graph with explicit
   driver policy (`AgentStepConfig`: `SpawnPolicy` admission scoped to the team
-  id, `SubAgentPolicy` timeout/retry/budget, `ResultPolicy`, `SubagentRole`).
+  id with the member id as target, `SubAgentPolicy::timeout`, `ResultPolicy`).
+  Retry, token budget and role need worker-reported transient failures / usage /
+  a tool surface that `MemberOutcome` does not carry, so they do not take
+  effect through this adapter (use `subagent::run_agent_step` directly).
+  `MemberStep::default()` shares one scope and has no target: give a limited
+  config a real `MemberStep::new(config, team, member)`.
   A completed run goes to `on_complete` with the policy-trimmed output; a
   spawn rejection, timeout, exceeded budget or worker-reported failure goes to
   `on_failed` with the reason; a worker `Err` still fails the graph run.

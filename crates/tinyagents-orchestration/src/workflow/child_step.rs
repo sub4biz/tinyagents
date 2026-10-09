@@ -13,8 +13,23 @@ use super::engine::{
     WorkflowExecutor, render_compat_output,
 };
 use crate::subagent::{
-    AgentStepConfig, AgentStepIdentity, StepSuccess, SubagentOutcomeKind, run_agent_step,
+    AgentStepConfig, AgentStepIdentity, IncompleteKind, StepSuccess, SubagentOutcomeKind,
+    run_agent_step,
 };
+
+/// Remembers the child ids one step registered so a timed-out child can be
+/// cancelled by id (the engine only cancels on interruption or lease loss).
+struct RecordingRegistration {
+    inner: Arc<dyn WorkflowChildRegistration>,
+    ids: parking_lot::Mutex<Vec<String>>,
+}
+
+impl WorkflowChildRegistration for RecordingRegistration {
+    fn register(&self, child_id: String) -> Result<(), OrchestrationError> {
+        self.ids.lock().push(child_id.clone());
+        self.inner.register(child_id)
+    }
+}
 
 const LOG_PREFIX: &str = "[workflow-child-step]";
 
@@ -38,12 +53,18 @@ pub(super) async fn run_child_step<E: WorkflowExecutor + 'static>(
         request.agent_id
     );
     let work_request = request.clone();
+    let registration = Arc::new(RecordingRegistration {
+        inner: registration,
+        ids: parking_lot::Mutex::new(Vec::new()),
+    });
+    let recorded = registration.clone();
+    let cancel_executor = executor.clone();
     // `cancel` is the lifecycle token: cancelling the run reaches the child,
     // whose own token the driver derives from it.
     let result = run_agent_step(config, identity, cancel, move |token| {
         let executor = executor.clone();
         let request = work_request.clone();
-        let registration = registration.clone();
+        let registration: Arc<dyn WorkflowChildRegistration> = registration.clone();
         async move {
             let result = executor
                 .execute(request, token, registration)
@@ -68,6 +89,21 @@ pub(super) async fn run_child_step<E: WorkflowExecutor + 'static>(
                 Ok(child)
             }
             SubagentOutcomeKind::Incomplete(incomplete) => {
+                tracing::debug!(
+                    "{LOG_PREFIX} incomplete run={} phase={} agent={} kind={:?}",
+                    request.run_id,
+                    request.phase,
+                    request.agent_id,
+                    incomplete.kind
+                );
+                if incomplete.kind == IncompleteKind::Timeout {
+                    // The driver dropped the executor future; the host's real
+                    // child may still be running, so cancel what it registered.
+                    let ids = recorded.ids.lock().clone();
+                    if !ids.is_empty() {
+                        cancel_executor.cancel_children(&ids).await;
+                    }
+                }
                 Err(OrchestrationError(incomplete.reason))
             }
             // The engine re-checks its own token after the fan-out and treats
@@ -80,6 +116,14 @@ pub(super) async fn run_child_step<E: WorkflowExecutor + 'static>(
                 "workflow child paused for input".to_owned(),
             )),
         },
-        Err(error) => Err(OrchestrationError(error.to_string())),
+        Err(error) => {
+            tracing::debug!(
+                "{LOG_PREFIX} failed run={} phase={} agent={} error={error}",
+                request.run_id,
+                request.phase,
+                request.agent_id
+            );
+            Err(OrchestrationError(error.to_string()))
+        }
     }
 }

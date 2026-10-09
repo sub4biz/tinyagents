@@ -58,9 +58,15 @@ collects results, and manages state transitions durably.
 - **`child_step.rs`** — runs each agent child through `SubagentDriver`
   (`subagent::run_agent_step`). `WorkflowEngine::with_step_config` applies an
   `AgentStepConfig` (spawn admission scoped per workflow run id and targeted
-  at the agent id, timeout/retry/budget, result policy, role). The default is
-  inert; a refused, timed-out or over-budget child fails its phase with the
-  reason, and a result-policy-trimmed output replaces the raw output.
+  at the agent id, `SubAgentPolicy::timeout`, result policy). The default is
+  inert; a refused or timed-out child fails its phase with the reason (a
+  timed-out child is also cancelled by its registered id), and a
+  result-policy-trimmed output replaces the raw output (as a string). Retry,
+  token budget and role cannot take effect here: the executor reports no
+  usage, transient failures or tools. Admission slots are not refunded when an
+  interrupted phase re-runs on resume, and a per-parent live cap below
+  `default_concurrency` rejects siblings (failing the phase) instead of queueing.
+  Each child gets a child cancellation token of the run's token.
 - **`validate.rs`** — structural validation: no duplicate phases, valid
   dependencies, no cycles, valid concurrency settings, etc.
 - **`tests.rs`** — tests for scheduling, phase transitions, concurrency,
@@ -69,7 +75,8 @@ collects results, and manages state transitions durably.
 ## Relationship to other modules
 
 - **Depends on:** `tinyagents-graph` (DAG validation), `tinyagents-session`
-  (run ledger), `tinyagents-harness` (cancellation, error types).
+  (run ledger), `tinyagents-harness` (cancellation, error types), and this crate's `subagent`
+  module (`run_agent_step`).
 - **Used by:** host orchestration logic (workflow management and execution).
 - **Integration:** Can model multi-agent phases as teams (via
   `orchestration::teams`).

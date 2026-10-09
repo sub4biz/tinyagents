@@ -231,9 +231,9 @@ pub(super) struct FakeExecutor {
 }
 
 #[derive(Default)]
-struct BlockingExecutor {
+pub(super) struct BlockingExecutor {
     started: tokio::sync::Notify,
-    cancelled: Mutex<Vec<String>>,
+    pub(super) cancelled: Mutex<Vec<String>>,
     calls: AtomicUsize,
 }
 

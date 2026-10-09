@@ -205,8 +205,12 @@ executor) to the driver's planner / executor / in-memory persistence seams and
 runs it on a real `SubagentDriver`. `teams::run_member_graph_with` and
 `WorkflowEngine::with_step_config` call it, so those steps honour `SpawnPolicy`
 admission (scope = team id / workflow run id, target = member / agent id),
-`SubAgentPolicy` timeout, retry (`StepWorkError::Transient`) and token budget,
-`ResultPolicy`, `SubagentRole` and the typed `SubagentOutcomeKind`.
+`SubAgentPolicy::timeout` and `ResultPolicy` and the typed
+`SubagentOutcomeKind`. Retry (`StepWorkError::Transient`), token budget (`StepSuccess::usage`) and
+`SubagentRole` are supported by `run_agent_step` itself, but the team and
+workflow adapters have no source for them (their workers report no transient
+failures or usage and expose no tools), so they only take effect for callers
+that use `run_agent_step` directly.
 
 `AgentStepConfig::default()` is inert (unlimited admission, no timeout, one
 attempt, no trimming), so `run_member_graph` and a `WorkflowEngine` without

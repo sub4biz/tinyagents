@@ -4,6 +4,8 @@ Sub-agents are harness agents registered in the registry and invoked from graph
 nodes. They are not opaque side effects; they are child runs with their own
 events, usage, cost, failures, and optional streams.
 
+> **Deprecated.** `SubAgentNode` / `subagent_node` are `#[deprecated(note = "use tinyagents_orchestration SubagentDriver")]`: graph cannot depend on orchestration, so they cannot adapt the driver. Behaviour is unchanged.
+
 ```rust
 pub struct SubAgentNode {
     pub agent: ComponentId,

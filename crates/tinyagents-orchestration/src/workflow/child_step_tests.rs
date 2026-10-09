@@ -50,7 +50,10 @@ async fn result_policy_cap_trims_a_workflow_child_output() {
         .unwrap()
         .to_owned();
     assert_ne!(out, "plan output", "ResultPolicy trimmed the child output");
-    assert!(out.chars().count() < "plan output".chars().count() + 40);
+    assert!(
+        out.chars().count() <= 4 + 64,
+        "capped near max_chars: {out}"
+    );
     // Trimmed output is carried verbatim as the raw output too.
     assert_eq!(
         states["plan"]["outputs"][0]["metadata"]["rawOutput"],
@@ -85,5 +88,44 @@ async fn default_step_config_leaves_the_output_untouched() {
     assert_eq!(
         store.load("run").unwrap().unwrap().status,
         WorkflowRunStatus::Completed
+    );
+}
+
+#[tokio::test]
+async fn timed_out_child_is_cancelled_by_its_registered_id() {
+    use std::time::Duration;
+
+    use super::tests::BlockingExecutor;
+    use crate::subagent::SubAgentPolicy;
+
+    let store = Arc::new(MemoryStore::default());
+    let executor = Arc::new(BlockingExecutor::default());
+    let engine = WorkflowEngine::new(store.clone(), executor.clone()).with_step_config(
+        AgentStepConfig::default()
+            .with_policy(SubAgentPolicy::default().with_timeout(Duration::from_millis(30))),
+    );
+    let def = definition();
+    engine
+        .initialise("run".into(), &def, json!("q"), None)
+        .unwrap();
+    engine
+        .drive("run", &def, CancellationToken::new())
+        .await
+        .unwrap();
+    let run = store.load("run").unwrap().unwrap();
+    assert_eq!(run.status, WorkflowRunStatus::Failed);
+    assert!(
+        run.phase_states.to_string().contains("timed out"),
+        "{}",
+        run.phase_states
+    );
+    assert!(
+        executor
+            .cancelled
+            .lock()
+            .iter()
+            .any(|id| id == "live-plan-0"),
+        "the timed-out child was cancelled: {:?}",
+        executor.cancelled.lock()
     );
 }
