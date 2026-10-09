@@ -227,7 +227,7 @@ async fn an_incomplete_child_is_recorded_with_its_reason() {
 #[tokio::test]
 async fn an_executor_failure_is_recorded_and_still_returned() {
     let router = router();
-    let behaviour: Behaviour = Arc::new(|_| Err(SubagentError::Executor("boom".into())));
+    let behaviour: Behaviour = Arc::new(|_| Err(SubagentError::Execution("boom".into())));
     let driver =
         driver(NotifyMode::Off, Some("p"), behaviour).with_completion_router(router.clone());
     let result = driver.run(request("t1"), CancellationToken::new()).await;
