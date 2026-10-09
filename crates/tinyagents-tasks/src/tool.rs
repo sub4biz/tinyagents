@@ -1,4 +1,4 @@
-//! Ordinary harness tools for graph orchestration controls.
+//! Ordinary harness tools for detached-task orchestration controls.
 //!
 //! This file is the model-facing edge of the module: it turns each
 //! [`OrchestrationToolKind`](crate::OrchestrationToolKind) into a normal
