@@ -191,7 +191,10 @@ async fn followup_mode_pushes_onto_the_followup_lane_of_a_live_parent() {
         }
     );
     let status = q.status().await;
-    assert_eq!((status.followups, status.collects, status.steers), (1, 0, 0));
+    assert_eq!(
+        (status.followups, status.collects, status.steers),
+        (1, 0, 0)
+    );
     let pushed = q.drain(QueueLane::Followup).await;
     assert!(format!("{:?}", pushed[0]).contains("t1"));
     assert!(

@@ -63,9 +63,7 @@ impl InMemoryCompletionStore {
     }
 
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, HashMap<String, CompletionRecord>>> {
-        self.inner
-            .lock()
-            .map_err(|_| store_err("lock", "poisoned"))
+        self.inner.lock().map_err(|_| store_err("lock", "poisoned"))
     }
 }
 
@@ -233,7 +231,10 @@ impl CompletionStore for JsonlCompletionStore {
             serde_json::to_string(record).map_err(|e| store_err("serialize record", e))?;
         line.push('\n');
         run_blocking(|| -> Result<()> {
-            let mut file = self.file.lock().map_err(|_| store_err("file lock", "poisoned"))?;
+            let mut file = self
+                .file
+                .lock()
+                .map_err(|_| store_err("file lock", "poisoned"))?;
             // One write_all of the whole line, then fsync: a crash leaves either
             // the full line or a torn tail that `open` discards.
             file.write_all(line.as_bytes())
@@ -252,7 +253,10 @@ impl CompletionStore for JsonlCompletionStore {
     fn compact(&self, retain: Duration) -> Result<usize> {
         let now = SystemTime::now();
         run_blocking(|| -> Result<usize> {
-            let mut file = self.file.lock().map_err(|_| store_err("file lock", "poisoned"))?;
+            let mut file = self
+                .file
+                .lock()
+                .map_err(|_| store_err("file lock", "poisoned"))?;
             let mut map = self.inner.lock()?;
             let before = map.len();
             let kept: Vec<&CompletionRecord> =

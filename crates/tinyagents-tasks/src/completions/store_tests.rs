@@ -34,7 +34,10 @@ async fn pending_completions_survive_a_reopen() {
     let router = open_router(&path);
     let pending = router.pending_for("p");
     assert_eq!(
-        pending.iter().map(|r| r.task_id.as_str()).collect::<Vec<_>>(),
+        pending
+            .iter()
+            .map(|r| r.task_id.as_str())
+            .collect::<Vec<_>>(),
         ["t1", "t2"]
     );
     assert_eq!(pending[0].result.text, "result of t1");
@@ -79,7 +82,10 @@ async fn delivered_and_tombstoned_stay_deduped_after_a_reopen() {
     for task in ["done", "waited", "early"] {
         let outcome = router.record(record(task, "p")).await.unwrap();
         assert!(
-            matches!(outcome, RecordOutcome::Duplicate | RecordOutcome::Suppressed),
+            matches!(
+                outcome,
+                RecordOutcome::Duplicate | RecordOutcome::Suppressed
+            ),
             "{task}: {outcome:?}"
         );
     }

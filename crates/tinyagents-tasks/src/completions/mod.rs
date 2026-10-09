@@ -25,9 +25,7 @@ mod store;
 mod types;
 
 pub use format::{CompletionFormatter, NeutralCompletionFormatter};
-pub use router::{
-    CompletionRouter, DEFAULT_MAX_ATTEMPTS, RecordOutcome, TombstoneOutcome,
-};
+pub use router::{CompletionRouter, DEFAULT_MAX_ATTEMPTS, RecordOutcome, TombstoneOutcome};
 pub use store::{CompletionStore, InMemoryCompletionStore, JsonlCompletionStore};
 pub use types::{
     CompletionArtifact, CompletionRecord, CompletionResult, CompletionState, CompletionStatus,
