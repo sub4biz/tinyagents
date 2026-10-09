@@ -12,8 +12,8 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use super::tool_changes;
-use crate::tool::ToolGate;
 use super::*;
+use crate::tool::ToolGate;
 
 impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
     /// The direct tool schemas: the registry's `Direct` schemas filtered by the
@@ -49,7 +49,13 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
                 .await?
                 .into_iter()
                 .filter(|tool| tool.exposure() == tinytools::ToolExposure::Direct)
-                .filter(|tool| gate.lists(tool.name(), Some(tool.as_ref()), tinytools::Surface::Catalog))
+                .filter(|tool| {
+                    gate.lists(
+                        tool.name(),
+                        Some(tool.as_ref()),
+                        tinytools::Surface::Catalog,
+                    )
+                })
                 .filter(|tool| !existing.contains(tool.name()))
                 .map(|tool| crate::tool::provider_schema(tool.as_ref()))
                 .collect();

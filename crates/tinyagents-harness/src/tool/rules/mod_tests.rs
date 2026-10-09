@@ -44,7 +44,11 @@ fn a_permissive_definition_layer_is_ignored() {
     let policy = ToolRulePolicy::new(deny("x_*"));
     let gate = ToolGate::new(None, &policy, Some(&ToolRules::allow_all()));
     assert!(!gate.lists("x_1", None, Surface::Catalog));
-    let empty = ToolGate::new(None, &ToolRulePolicy::default(), Some(&ToolRules::allow_all()));
+    let empty = ToolGate::new(
+        None,
+        &ToolRulePolicy::default(),
+        Some(&ToolRules::allow_all()),
+    );
     assert!(empty.rules.is_none());
 }
 
@@ -54,7 +58,8 @@ fn the_policy_context_reaches_when_conditions() {
         { "effect": "deny", "match": { "name": "shell" }, "when": { "channel": "web" } },
     ] }))
     .expect("rules");
-    let web = ToolRulePolicy::new(rules.clone()).with_context(RuleContext::new().with("channel", "web"));
+    let web =
+        ToolRulePolicy::new(rules.clone()).with_context(RuleContext::new().with("channel", "web"));
     let cli = ToolRulePolicy::new(rules).with_context(RuleContext::new().with("channel", "cli"));
     assert!(!ToolGate::new(None, &web, None).lists("shell", None, Surface::Catalog));
     assert!(ToolGate::new(None, &cli, None).lists("shell", None, Surface::Catalog));

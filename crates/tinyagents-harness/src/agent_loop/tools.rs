@@ -99,9 +99,8 @@
 use super::model_call::ToolCallBase;
 use super::*;
 use crate::tool::{
-    CallGate, DeferredToolRequests, LedgerFailure, ToolDispatch, ToolEffectSettle,
-    ToolEffectStart, ToolEffectStatus, ToolGate, ToolProgressGate, ToolProgressLimits,
-    provider_schema,
+    CallGate, DeferredToolRequests, LedgerFailure, ToolDispatch, ToolEffectSettle, ToolEffectStart,
+    ToolEffectStatus, ToolGate, ToolProgressGate, ToolProgressLimits, provider_schema,
 };
 use sha2::{Digest, Sha256};
 use tinyinference_llm::message::ContentBlock;
@@ -294,13 +293,20 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
         let allowed = self.resolve_tool_allowlist(ctx)?;
         let binding = crate::runtime::host_invocation_binding::<State, Ctx>(ctx)?;
         let definition_rules = binding.as_ref().and_then(|b| b.tool_rules.as_ref());
-        Ok(ToolGate::new(allowed, &self.policy.tool_rules, definition_rules))
+        Ok(ToolGate::new(
+            allowed,
+            &self.policy.tool_rules,
+            definition_rules,
+        ))
     }
 
     /// Builds the run's deferred-tool catalogue: every
     /// [`tinytools::ToolExposure::Deferred`] registration the gate lets the
     /// model search for, or an empty catalogue when discovery is disabled.
-    pub(super) fn deferred_catalog(&self, gate: &ToolGate) -> crate::tool::discover::DeferredCatalog {
+    pub(super) fn deferred_catalog(
+        &self,
+        gate: &ToolGate,
+    ) -> crate::tool::discover::DeferredCatalog {
         if !self.policy.discovery.enabled {
             return crate::tool::discover::DeferredCatalog::default();
         }

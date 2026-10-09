@@ -155,7 +155,11 @@ async fn run(harness: &AgentHarness<()>, name: &str) -> crate::middleware::Agent
 #[tokio::test]
 async fn denied_and_hidden_tools_leave_the_catalogue_and_search() {
     let model = Arc::new(ScriptedModel::new(vec![
-        calls(vec![("search", "tool_search", json!({"query": "deferred"}))]),
+        calls(vec![(
+            "search",
+            "tool_search",
+            json!({"query": "deferred"}),
+        )]),
         ModelResponse::assistant("done"),
     ]));
     let policy = ToolRulePolicy::new(rules(json!({
@@ -283,10 +287,7 @@ async fn an_indirect_target_is_checked_against_the_rules() {
 #[tokio::test]
 async fn require_approval_defers_and_auto_approve_waives_a_declaration() {
     let model = Arc::new(ScriptedModel::new(vec![
-        calls(vec![
-            ("c1", "gated", json!({})),
-            ("c2", "send", json!({})),
-        ]),
+        calls(vec![("c1", "gated", json!({})), ("c2", "send", json!({}))]),
         ModelResponse::assistant("never reached"),
     ]));
     let policy = ToolRulePolicy::new(rules(json!({ "rules": [
@@ -301,7 +302,11 @@ async fn require_approval_defers_and_auto_approve_waives_a_declaration() {
 
     let run = run(&harness, "approval").await;
 
-    assert_eq!(gated.calls(), 1, "auto_approve waived the declared approval");
+    assert_eq!(
+        gated.calls(),
+        1,
+        "auto_approve waived the declared approval"
+    );
     assert_eq!(send.calls(), 0, "require_approval deferred the call");
     let deferred = run.deferred.expect("the run waits for approval");
     assert_eq!(deferred.approvals.len(), 1);
@@ -318,7 +323,10 @@ async fn a_hosted_definition_stacks_its_rules_on_the_policy() {
     ]));
     let definition = AgentDefinition::new("helper", "Helper", "test helper")
         .with_tools(["file_read", "web_fetch", "shell"])
-        .with_tool_rules(ToolRules::from_allow_deny(["file_*", "web_*"], Vec::<String>::new()));
+        .with_tool_rules(ToolRules::from_allow_deny(
+            ["file_*", "web_*"],
+            Vec::<String>::new(),
+        ));
     let host = HostCapabilities::new(
         Arc::new(StaticContextComposer::empty()),
         Arc::new(InMemoryDefinitionRegistry::new(vec![definition])),
@@ -334,7 +342,11 @@ async fn a_hosted_definition_stacks_its_rules_on_the_policy() {
     )));
     let mut harness = harness_with(model.clone(), policy);
     let web = RuleTool::new("web_fetch");
-    for tool in [RuleTool::new("file_read"), web.clone(), RuleTool::new("shell")] {
+    for tool in [
+        RuleTool::new("file_read"),
+        web.clone(),
+        RuleTool::new("shell"),
+    ] {
         harness.register_tool(tool);
     }
 
