@@ -11,35 +11,28 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use rusqlite::Connection;
+use tinystoragedrivers_sqlite::SqliteNative;
 
 use super::context::StorageContext;
 use super::migrations;
-use tinyagents_harness::error::Result;
+use tinyagents_harness::error::{Result, TinyAgentsError};
 
-/// A connection handle shared by every caller for one database path.
+/// Process-wide cache of opened session databases, keyed by the database
+/// file path.
 ///
-/// `rusqlite::Connection` is `Send` but not `Sync`, so a `Mutex` is the
-/// minimum needed to hand the same handle to concurrent callers; it also
-/// gives operations on one database path the same autocommit serialization
-/// they had before, when each call opened (and implicitly serialized behind)
-/// its own file handle.
-type ConnectionHandle = Arc<Mutex<Connection>>;
-
-/// Process-wide cache of open session-database connections, keyed by the
-/// resolved database file path.
-///
-/// A `Connection::open` per operation was measured as the dominant cost of
-/// session-store calls under load: each open re-parses pragmas, re-checks
-/// migrations, and pays SQLite's own connection setup. Caching by path
-/// reuses one connection for the lifetime of the process (or until nothing
-/// references it — entries are never evicted, matching the small, bounded
-/// number of distinct workspaces a single process actually opens).
-fn connection_cache() -> &'static Mutex<HashMap<PathBuf, ConnectionHandle>> {
-    static CACHE: OnceLock<Mutex<HashMap<PathBuf, ConnectionHandle>>> = OnceLock::new();
+/// The connection itself belongs to the SQLite driver's native mode: one
+/// shared connection per file for the whole process, behind one lock, which
+/// every other handle the host opens on the same file (async or sync) also
+/// goes through. This cache keeps that connection alive and records that the
+/// session pragmas and migrations ran on it, so they run once per path rather
+/// than on every call — a `Connection::open` per operation was measured as
+/// the dominant cost of session-store calls under load.
+fn connection_cache() -> &'static Mutex<HashMap<PathBuf, SqliteNative>> {
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, SqliteNative>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -80,13 +73,14 @@ pub fn db_path(workspace_dir: &Path) -> PathBuf {
     workspace_dir.join(DB_SUBDIR).join(DB_FILE)
 }
 
-/// Returns the cached connection for `db_path`, opening and preparing one
-/// (pragmas, then migrations) the first time this path is seen.
+/// Returns the native handle for `db_path`, opening it and preparing the
+/// shared connection (pragmas, then migrations) the first time this path is
+/// seen.
 ///
-/// Pragma setup and migrations run exactly once per path, when the
-/// connection is created — not on every call — since both are properties of
-/// the connection/database, not of an individual operation.
-fn cached_connection(db_path: &Path) -> Result<ConnectionHandle> {
+/// Pragma setup and migrations run exactly once per path, when the handle is
+/// created — not on every call — since both are properties of the
+/// connection/database, not of an individual operation.
+fn cached_connection(db_path: &Path) -> Result<SqliteNative> {
     let mut cache = connection_cache()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -101,42 +95,57 @@ fn cached_connection(db_path: &Path) -> Result<ConnectionHandle> {
         ))?;
     }
 
-    let conn = Connection::open(db_path)
-        .storage_context(&format!("failed to open session DB: {}", db_path.display()))?;
-    prepare_connection(&conn)?;
-    migrations::apply(&conn)?;
+    let native = SqliteNative::open(db_path).map_err(|error| {
+        TinyAgentsError::Storage(format!(
+            "failed to open session DB: {}: {error}",
+            db_path.display()
+        ))
+    })?;
+    native
+        .run_blocking(|conn| {
+            prepare_connection(conn)?;
+            migrations::apply(conn)
+        })
+        .map_err(driver_error)??;
 
-    let handle: ConnectionHandle = Arc::new(Mutex::new(conn));
-    cache.insert(db_path.to_path_buf(), handle.clone());
-    Ok(handle)
+    tracing::debug!(
+        target: "tinyagents_session::store",
+        path = %db_path.display(),
+        "[session] opened session DB on the sqlite driver's native mode"
+    );
+    cache.insert(db_path.to_path_buf(), native.clone());
+    Ok(native)
+}
+
+fn driver_error(error: tinystoragedrivers_sqlite::tinystoragedrivers_core::StorageError) -> TinyAgentsError {
+    TinyAgentsError::Storage(format!("session DB: {error}"))
 }
 
 /// Opens (or reuses) the workspace's session database connection, applying
 /// schema migrations on first use, and runs `f` against the connection.
 ///
-/// A single connection per database path is cached for the process and
-/// reused across calls, guarded by a `Mutex` so operations on the same path
-/// still serialize the way they did when every call opened its own file
-/// handle. Note that because the connection is cached rather than reopened,
-/// a database file atomically replaced at this same path after the first
-/// call will *not* be picked up — the process keeps its original handle.
+/// The connection is the SQLite driver's shared one for this file, guarded
+/// by its lock, so operations on the same path serialize the way they did
+/// when every call opened its own file handle. It blocks the calling thread
+/// while it waits for that lock and runs `f`. Note that because the
+/// connection is cached rather than reopened, a database file atomically
+/// replaced at this same path after the first call will *not* be picked up —
+/// the process keeps its original handle.
 pub fn with_connection<T>(
     workspace_dir: &Path,
     f: impl FnOnce(&Connection) -> Result<T>,
 ) -> Result<T> {
     let db_path = db_path(workspace_dir);
-    let handle = cached_connection(&db_path)?;
-    let conn = handle
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    f(&conn)
+    let native = cached_connection(&db_path)?;
+    native.run_blocking(f).map_err(driver_error)?
 }
 
 /// Applies the per-connection pragmas every session-DB handle needs.
 ///
-/// `journal_mode = WAL` is persistent (stored in the file header) but is set
-/// here so a freshly created database gets it; `foreign_keys` and
-/// `busy_timeout` are **per connection** and must be set on every open.
+/// The driver already opens its connection with WAL and a busy timeout; they
+/// are set again here so the session's own guarantees stay stated (and
+/// greppable) in this crate rather than inherited silently. `foreign_keys`
+/// is per connection and only this crate wants it, so it is set here.
 fn prepare_connection(conn: &Connection) -> Result<()> {
     conn.busy_timeout(BUSY_TIMEOUT)
         .storage_context("failed to set session DB busy_timeout")?;

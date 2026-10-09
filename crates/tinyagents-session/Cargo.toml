@@ -30,6 +30,9 @@ tokio = { workspace = true, default-features = true, features = ["sync"] }
 uuid = { workspace = true }
 # Session stores over `tinystoragedrivers` ports (`storage-drivers` feature).
 tinystoragedrivers-core = { workspace = true, optional = true, features = ["blocking"] }
+# `sessions.db` runs on the SQLite driver's native mode: the driver owns the
+# shared per-file connection, this crate keeps its own tables and SQL.
+tinystoragedrivers-sqlite = { workspace = true }
 
 [features]
 default = []
@@ -46,8 +49,6 @@ storage-drivers = [
 ]
 
 [dev-dependencies]
-# The `storage-drivers` provider is checked against a real SQLite backend too.
-tinystoragedrivers-sqlite = { path = "../../vendor/tinystoragedrivers/crates/tinystoragedrivers-sqlite" }
 tokio = { workspace = true, default-features = true, features = ["macros", "rt-multi-thread"] }
 
 [lints]
