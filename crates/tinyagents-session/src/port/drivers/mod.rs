@@ -63,6 +63,8 @@ pub struct DriverSessionStores {
     agents: Mutex<HashMap<String, AgentStores>>,
     recover_on_open: bool,
     recovered: Mutex<HashSet<String>>,
+    /// Names this provider in destination keys and handle paths.
+    id: uuid::Uuid,
 }
 
 impl std::fmt::Debug for DriverSessionStores {
@@ -95,6 +97,7 @@ impl DriverSessionStores {
             agents: Mutex::new(HashMap::new()),
             recover_on_open: false,
             recovered: Mutex::new(HashSet::new()),
+            id: uuid::Uuid::new_v4(),
         }
     }
 
@@ -140,9 +143,11 @@ impl DriverSessionStores {
         }
         let scoped = self.backend.for_scope(&Self::scope_for(agent_id))?;
         let stores = self.build(&scoped);
-        if self.recover_on_open && !self.recover_agent(agent_id, &stores) {
-            // Not cached, so the next open tries the recovery again.
-            return Ok(stores);
+        if self.recover_on_open {
+            // Fail closed: stores whose recovery did not run must not start
+            // turns a retried sweep would then mistake for crash residue.
+            // Nothing is cached, so the next open tries again.
+            self.recover_agent(agent_id, &stores)?;
         }
         Ok(self
             .agents
@@ -154,19 +159,19 @@ impl DriverSessionStores {
     }
 
     /// Interrupts `agent_id`'s in-flight turns unless this provider already
-    /// did; returns whether the agent is now recovered.
+    /// did.
     ///
     /// The `recovered` lock is held across the sweep, so a concurrent first
     /// open of the same agent waits for it instead of handing out stores a
     /// still-running sweep could interrupt a new turn on. The agent is
     /// recorded only once the sweep succeeds.
-    fn recover_agent(&self, agent_id: &str, stores: &AgentStores) -> bool {
+    fn recover_agent(&self, agent_id: &str, stores: &AgentStores) -> Result<(), StorageError> {
         let mut recovered = self
             .recovered
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
         if recovered.contains(agent_id) {
-            return true;
+            return Ok(());
         }
         let now = chrono::Utc::now().to_rfc3339();
         match stores.turn_states.mark_all_interrupted(&now) {
@@ -180,7 +185,7 @@ impl DriverSessionStores {
                     );
                 }
                 recovered.insert(agent_id.to_string());
-                true
+                Ok(())
             }
             Err(error) => {
                 tracing::warn!(
@@ -189,21 +194,19 @@ impl DriverSessionStores {
                     %error,
                     "[session-store] could not recover in-flight turns; retried on the next open"
                 );
-                false
+                Err(StorageError::unavailable(format!(
+                    "recovering in-flight turns failed: {error}"
+                )))
             }
         }
     }
 
     fn build(&self, scoped: &ScopedStorage) -> AgentStores {
         let docs = Arc::clone(scoped.documents());
-        // The backend's address keeps two backends with the same driver and
-        // scope from claiming one destination.
-        let label = format!(
-            "{}://{:p}/{}",
-            scoped.driver(),
-            Arc::as_ptr(&self.backend),
-            scoped.scope()
-        );
+        // The provider's own id keeps two providers with the same driver and
+        // scope from claiming one destination; unlike an address, it is
+        // never reused.
+        let label = format!("{}://{}/{}", scoped.driver(), self.id, scoped.scope());
         AgentStores {
             transcripts: Arc::new(DriverTranscriptLocator::new(
                 Arc::clone(&docs),
@@ -264,11 +267,7 @@ impl SessionStoreProvider for DriverSessionStores {
     }
 
     fn destination_key(&self) -> Option<String> {
-        Some(format!(
-            "{}://{:p}",
-            self.backend.driver(),
-            Arc::as_ptr(&self.backend)
-        ))
+        Some(format!("{}://{}", self.backend.driver(), self.id))
     }
 }
 
