@@ -8,39 +8,41 @@ checklist, and the module README for the package shape and feature index.
 ## Core Types
 
 Illustrative sketch of the harness's central types (not the literal current
-struct definitions — see `crates/tinyagents-harness/src/context/types.rs` and
+struct definitions, and the field lists are abridged — see `crates/tinyagents-harness/src/context/types.rs` and
 `crates/tinyagents-harness/src/runtime/types.rs` for the real fields):
 
 ```rust
 pub struct AgentHarness<State, Ctx = ()> {
-    models: ModelRegistry<State, Ctx>,
-    embeddings: EmbeddingRegistry<Ctx>,
+    models: ModelRegistry<State>,
     tools: ToolRegistry<State, Ctx>,
     middleware: MiddlewareStack<State, Ctx>,
-    memory: Option<Arc<dyn ShortTermMemory<State>>>,
-    stores: StoreRegistry,
     policy: RunPolicy,
+    response_cache: Option<Arc<dyn ResponseCache>>,
+    toolset: Option<Arc<dyn ToolSet<State, Ctx>>>,
+    capabilities: Vec<Capability<State, Ctx>>,
+    // ...plus tool timeouts, an output validator, a deferred-tool handler
+    // and a loop driver; see runtime/types.rs.
 }
 
 pub struct RunConfig {
     pub run_id: RunId,
-    pub parent_run_id: Option<RunId>,
-    pub root_run_id: RunId,
     pub thread_id: Option<ThreadId>,
     pub tags: Vec<String>,
     pub metadata: serde_json::Value,
-    pub configurable: serde_json::Value,
-    pub timeout: Option<Duration>,
-    pub max_model_calls: usize,
-    pub max_tool_calls: usize,
+    pub timeout_ms: Option<u64>,
+    pub max_model_calls: Option<usize>,
+    pub max_tool_calls: Option<usize>,
+    pub max_turn_output_tokens: Option<u32>,
+    pub lineage: RunLineage, // root_run_id, parent_run_id, ...
 }
 
 pub struct RunContext<Ctx = ()> {
     pub config: RunConfig,
     pub data: Ctx,
-    pub events: EventSink,
     pub stores: StoreRegistry,
+    pub events: EventSink,
     pub cancellation: CancellationToken,
+    // ...plus the frozen system prefix length and the target model profile.
 }
 ```
 
