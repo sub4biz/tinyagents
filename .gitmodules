@@ -10,3 +10,6 @@
 [submodule "vendor/tinyliveagents"]
 	path = vendor/tinyliveagents
 	url = https://github.com/tinyhumansai/tinyliveagents.git
+[submodule "vendor/tinystoragedrivers"]
+	path = vendor/tinystoragedrivers
+	url = https://github.com/tinyhumansai/tinystoragedrivers.git

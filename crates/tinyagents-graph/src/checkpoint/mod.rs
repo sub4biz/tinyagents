@@ -13,11 +13,15 @@
 //! at superstep boundaries only — never mid-node — so resuming always reruns a
 //! node from its start.
 
+#[cfg(feature = "storage-drivers")]
+mod drivers;
 mod file;
 #[cfg(feature = "sqlite")]
 mod sqlite;
 mod types;
 
+#[cfg(feature = "storage-drivers")]
+pub use drivers::DriverCheckpointer;
 pub use file::FileCheckpointer;
 #[cfg(feature = "sqlite")]
 pub use sqlite::SqliteCheckpointer;

@@ -40,6 +40,9 @@ tinyinference-image = { path = "../../vendor/tinyinference/crates/tinyinference-
 tinyinference-video = { path = "../../vendor/tinyinference/crates/tinyinference-video", version = "0.3.0", optional = true }
 tinytools = { path = "../../vendor/tinytools/crates/tinytools", version = "0.5.0" }
 tokio = { workspace = true, features = ["sync", "time", "macros", "rt", "rt-multi-thread", "fs", "io-util", "process"] }
+# Storage ports (no database client): the `storage-drivers` adapters put
+# the harness `Store` / `AppendStore` on any tinystoragedrivers backend.
+tinystoragedrivers-core = { workspace = true, optional = true }
 tempfile = { workspace = true }
 wait-timeout = { version = "0.2", optional = true }
 uuid = { workspace = true }
@@ -47,6 +50,10 @@ uuid = { workspace = true }
 [features]
 default = ["claude-code", "langfuse"]
 sqlite = ["dep:rusqlite"]
+# `store::DriverStore` / `store::DriverAppendStore` over tinystoragedrivers
+# ports, so a host's chosen backend (SQLite, MongoDB, memory) holds harness
+# data.
+storage-drivers = ["dep:tinystoragedrivers-core"]
 # `tools` is a deprecated alias kept so downstream feature forwards that
 # still spell out the old name keep compiling.
 tools = ["builtin-tools"]

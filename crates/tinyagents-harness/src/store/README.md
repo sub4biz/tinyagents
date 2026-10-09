@@ -75,3 +75,26 @@ The richer, TTL-aware, batch-oriented sibling trait — see its own README.
   writers.
 - None of the in-memory backends are durable: data is lost when the value is
   dropped.
+
+## Storage-driver backends (`storage-drivers` feature)
+
+`DriverStore` and `DriverAppendStore` adapt the harness `Store` and
+`AppendStore` traits onto [tinystoragedrivers](https://github.com/tinyhumansai/tinystoragedrivers)
+ports. A host opens one storage backend (SQLite on desktop, MongoDB in the cloud,
+memory in tests), takes a scoped `DocumentStore` / `StreamStore` for the tenant,
+and wraps it:
+
+```rust,ignore
+let scoped = backend.for_scope(&Scope::new(agent_id)?)?;
+let kv = DriverStore::new(scoped.documents().clone());
+let journal = DriverAppendStore::with_prefix(scoped.streams().clone(), "journal/");
+```
+
+- `DriverStore` keeps every namespace in one collection (`harness_store` by
+  default) as `{ns, key, value}` documents, so namespaces and keys may hold any
+  characters, and `list` is an indexed query.
+- `DriverAppendStore` maps each stream to a driver stream (optionally
+  prefixed). Driver offsets are already dense and zero-based, matching the
+  `AppendStore` contract.
+- Driver `InvalidInput` errors surface as `TinyAgentsError::Validation`. Every
+  other driver error surfaces as `TinyAgentsError::Storage`.

@@ -34,15 +34,24 @@
 //!
 //! - [`InMemorySessionStores`]: per-agent, process-lifetime storage, for
 //!   tests and for hosts that deliberately keep nothing.
+//! - `DriverSessionStores` (feature `storage-drivers`): every agent's stores
+//!   in one `tinystoragedrivers` backend (SQLite, MongoDB, ...), each agent
+//!   under its own storage scope.
 //! - The on-disk layout (`session_raw/`, `tinyagents_store/`, turn-state
 //!   files) is wrapped by the host that owns it, not here: this crate keeps
 //!   the file and SQLite building blocks, and a host crate decides to use them.
 
+#[cfg(feature = "storage-drivers")]
+mod drivers;
 mod memory;
 mod types;
 
 use std::sync::Arc;
 
+#[cfg(feature = "storage-drivers")]
+pub use drivers::{
+    DriverSessionStores, DriverTranscriptHistory, DriverTranscriptLocator, DriverTurnStates,
+};
 pub use memory::{InMemorySessionStores, InMemoryTranscriptLocator, InMemoryTurnStates};
 pub use types::AgentStores;
 

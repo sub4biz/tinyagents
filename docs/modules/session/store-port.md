@@ -41,8 +41,8 @@ not claim isolation.
 
 `TranscriptLocator`/`TranscriptHistory` and `TurnStates` are synchronous:
 the turn path that commits a transcript is a chain of sync methods. An
-implementation over an async client bridges at its own boundary (for tokio,
-`block_in_place` on a multi-threaded runtime). `Store` and `AppendStore` are
+implementation over an async client bridges at its own boundary (`DriverSessionStores` uses a dedicated runtime thread;
+`block_in_place` also works, on a multi-threaded tokio runtime only). `Store` and `AppendStore` are
 the harness's async traits; `Arc<dyn Store>` and `Arc<dyn AppendStore>`
 implement them, so code generic over a store accepts injected handles, and
 `FileStatusStore::over` keeps run status in any `Store`.
@@ -59,6 +59,67 @@ implement them, so code generic over a store accepts injected handles, and
   `openhuman_rpc::session_store`).
 - `TranscriptLocator::append_interrupted_partial` carries the display-only
   partial of an interrupted turn without a file path.
+- `DriverSessionStores` (feature `storage-drivers`): every agent's stores in
+  one `tinystoragedrivers` backend, described below.
+
+## `DriverSessionStores`
+
+With the `storage-drivers` feature, a host that has opened a
+`tinystoragedrivers` backend (SQLite on a desktop, MongoDB in the cloud,
+memory in tests) gets a complete provider from it:
+
+```rust
+let backend: Arc<dyn StorageBackend> = Arc::new(SqliteStorage::open(path)?);
+let provider = DriverSessionStores::new(backend)?.recover_on_open(true);
+```
+
+Each agent id becomes a storage `Scope`. An id that is not a valid scope,
+or that starts with the reserved `sha256:` prefix, maps to `sha256:<hex>` of
+itself, so no raw id can name a hashed scope, and the driver enforces scopes, so the
+provider claims isolation and passes `session_store_isolation_conformance`.
+
+| Store | Backend shape |
+| --- | --- |
+| transcripts | `session_transcripts`: one index document per stem (thread, agent, sub-agent flag, creation time); `session_transcript_entries`: an append-only log per stem |
+| turn states | `session_turn_states`: one document per `(thread, request)` |
+| key-value | `session_kv` through the harness `DriverStore` |
+| journal | streams `16:session_journal/<name>` (the harness `DriverAppendStore` always writes `<prefix len>:` first) |
+
+- **Transcript log.** Each write is one entry, numbered from 0 and claimed
+  with an insert-only write. An ordinary turn stores only its new rows
+  (`extend`); a first write or a compaction stores the whole set (`set`). Two
+  writers on one transcript (two processes on one database) serialize: the
+  loser re-reads and decides again, which is also how a write racing a seal is
+  refused. As in the JSONL writer, a turn whose `prev` is not what is stored
+  is refused as stale rather than allowed to replace newer rows, and the
+  written rows carry the turn's usage, request id and step stamps, built by
+  the writer's own code (`transcript::stamped_rows`).
+- **Index.** Each index document records the log entry it was built from
+  (`indexed_seq`). A handle with an older replay leaves it alone, and the
+  update is a compare-and-swap. A failed index refresh never fails the write
+  that preceded it; the next write retries it.
+- **Generations.** `begin_generation` reserves the successor in the index
+  before sealing the predecessor, so two compactions cannot both open it. A
+  reservation left unwritten for 30 seconds (its process stopped mid-way) may
+  be taken over, so a sealed head never strands the conversation.
+  `begin_generation_from_baseline` checks the baseline inside the seal
+  itself, so a turn committed after the caller read it fails the compaction
+  instead of vanishing from the successor. A failed seal releases the
+  reservation only at the version this call wrote.
+- **Turn states.** Conditional writes, settling, the interruption sweep and
+  retention pruning are all conditional on the document version.
+- **Sync seams.** Transcript and turn-state calls run on a
+  `tinystoragedrivers` `Blocking` bridge (one dedicated runtime thread), so
+  they work from any caller, inside a runtime or not.
+- **Recovery.** A backend cannot list its scopes, so `recover` covers the
+  agents this provider has opened. `recover_on_open(true)` also interrupts an
+  agent's in-flight turns the first time it is opened. The agent counts as
+  recovered only once the sweep succeeds, and a concurrent first open waits
+  for that sweep. Use it only when a
+  single process owns the database (the desktop app).
+- **Failing closed.** If the backend cannot bind an agent's scope, `for_agent`
+  returns stores that refuse every call with that error and does not cache
+  them. `try_for_agent` returns the error itself.
 
 ## Conformance
 
@@ -66,8 +127,9 @@ implement them, so code generic over a store accepts injected handles, and
 whole provider: transcripts (sessions, thread and agent lookups, compaction
 generations, partials kept out of the replay), turn states (conditional
 writes, settling, interrupted-marking) and the key-value and journal stores.
-`session_store_conformance` runs against `InMemorySessionStores` and the file
-building blocks. It checks the common session-store behavior, not provider
+`session_store_conformance` runs against `InMemorySessionStores`, the file
+building blocks and `DriverSessionStores` over the memory and SQLite drivers. It checks the common session-store behavior, not provider
 isolation. `session_store_isolation_conformance` is a separate check that two
 agents cannot see each other's data; it runs only against
-`InMemorySessionStores` and hosts whose providers claim isolation.
+`InMemorySessionStores`, `DriverSessionStores` and hosts whose providers claim
+isolation.

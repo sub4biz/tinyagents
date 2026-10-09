@@ -23,10 +23,17 @@ tinyinference-llm = { path = "../../vendor/tinyinference/crates/tinyinference-ll
 tinytools = { path = "../../vendor/tinytools/crates/tinytools", version = "0.5.0" }
 tokio = { workspace = true, features = ["sync", "time", "macros", "rt", "rt-multi-thread", "fs"] }
 tracing = { workspace = true }
+# Storage ports (no database client) for `DriverCheckpointer`.
+tinystoragedrivers-core = { workspace = true, optional = true }
+# Collision-resistant ids for `DriverCheckpointer` keys too long to store.
+sha2 = { version = "0.11", optional = true }
 
 [features]
 default = []
 sqlite = ["dep:rusqlite"]
+# `DriverCheckpointer`: checkpoints, pending writes and leases on any
+# tinystoragedrivers backend the host opened.
+storage-drivers = ["dep:tinystoragedrivers-core", "dep:sha2"]
 # Tracing instrumentation is now always compiled in (via the `tracing` crate
 # dependency above). This feature is retained as a no-op so downstream
 # feature forwards keep compiling.

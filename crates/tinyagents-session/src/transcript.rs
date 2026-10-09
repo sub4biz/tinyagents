@@ -156,6 +156,8 @@ pub use history::{
     FileTranscriptHistory, FileTranscriptLocator, TranscriptHistory, TranscriptLocator,
     TranscriptPartial, TranscriptRead, TranscriptTurn, TruncateCut,
 };
+#[cfg(feature = "storage-drivers")]
+pub(crate) use jsonl::stamped_rows;
 pub use legacy_md::read_transcript_legacy_md;
 pub use migration::{TranscriptLayoutMigration, migrate_layout_if_needed};
 pub use paths::{find_latest_transcript, resolve_keyed_transcript_path};
