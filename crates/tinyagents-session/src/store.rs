@@ -207,3 +207,7 @@ pub fn with_memory_connection<T>(f: impl FnOnce(&Connection) -> Result<T>) -> Re
     migrations::apply(&conn)?;
     f(&conn)
 }
+
+#[cfg(test)]
+#[path = "store_tests.rs"]
+mod tests;
