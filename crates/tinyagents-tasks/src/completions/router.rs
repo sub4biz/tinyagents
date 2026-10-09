@@ -175,7 +175,7 @@ impl CompletionRouter {
     /// the record is claimable again. Delivery is at-least-once.
     pub async fn record(&self, mut record: CompletionRecord) -> Result<RecordOutcome> {
         let push = {
-            let state = self.lock()?;
+            let mut state = self.lock()?;
             if state.cancelled_parents.contains(&record.parent_key) {
                 tracing::debug!(
                     task_id = %record.task_id,
