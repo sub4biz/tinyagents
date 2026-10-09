@@ -15,6 +15,7 @@ mod detached;
 mod driver;
 mod executor;
 mod invocation;
+mod outcome_status_map;
 mod persistence;
 mod planner;
 mod policy;
@@ -61,8 +62,6 @@ pub use types::{
     SubagentPersistenceDisposition, SubagentRequest, SubagentRequestParts, SubagentResume,
     SubagentRunResult, SubagentTaskKey, SubagentTerminalPersistenceDisposition,
 };
-
-mod outcome_status_map;
 
 #[cfg(test)]
 #[path = "mod_tests.rs"]
