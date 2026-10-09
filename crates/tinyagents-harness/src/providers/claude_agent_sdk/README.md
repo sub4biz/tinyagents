@@ -15,7 +15,7 @@ plain prompt-guided chat model, not an agent driver.
 | --- | --- |
 | `mod.rs` | `ClaudeAgentSdkConfig`, `ClaudeAgentSdkProvider` (`ChatModel<()>` impl), CLI argument/stdin building, the subprocess spawn/read/timeout loop, and system-prompt/transcript rendering. |
 | `protocol.rs` | `SdkMessage`/`SdkError`: the `serde` shapes for the `--output-format stream-json` NDJSON lines the CLI writes to stdout. |
-| `test.rs` | Unit tests for construction, invocation building, transcript rendering, and response assembly. |
+| `mod_tests.rs` | Unit tests for construction, invocation building, transcript rendering, and response assembly. |
 
 ## Request shaping
 

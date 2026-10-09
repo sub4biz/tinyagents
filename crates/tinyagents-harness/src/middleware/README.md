@@ -143,7 +143,7 @@ tracing — lives in `library/` and is re-exported through this module. See
 | `types.rs` | Every public type: traits, `MiddlewareStack`, and the middleware listed above. |
 | `mod.rs` | Behavioral code: `AgentRun` helpers, the stack runner. |
 | `library/` | The built-in middleware library — see [`library/README.md`](library/README.md). |
-| `test.rs` | Unit tests (ordering, short-circuiting, each middleware defined in this module). |
+| `mod_tests.rs` | Unit tests (ordering, short-circuiting, each middleware defined in this module). |
 
 ## Operational constraints
 

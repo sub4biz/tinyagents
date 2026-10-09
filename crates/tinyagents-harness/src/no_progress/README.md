@@ -148,7 +148,7 @@ guard's answer, not the tool failing, and counting them would double-escalate.
 | `monitor.rs` | `RepeatMonitor` and `RepeatProgressConfig`: the per-run composition a middleware drives. |
 | `stream_text/` | Chunk-independent streamed-text stall detector and focused tests. |
 | `types.rs` | Public and crate-private type definitions shared by both trackers. |
-| `test.rs` | Unit tests for the escalation ladder. |
+| `mod_tests.rs`, `escalation_tests.rs` and sibling `*_tests.rs` | Unit tests for the escalation ladder and the trackers. |
 
 ## Operational constraints
 

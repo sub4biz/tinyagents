@@ -10,7 +10,7 @@ this file is the map of the module.
 | `manifest.rs` | `render_manifest` — the budgeted listing inside `tool_search`'s description: full → names → count |
 | `bridge.rs`   | The one intrinsic tool, `tool_search`: `bridge_schemas`, `answer_tool_search` (async; returns a `SearchAnswer`) |
 | `embedding_ranker.rs` | `EmbeddingToolRanker` — a semantic `tinytools::ToolRanker` over any `EmbeddingModel`, cached in memory and optionally on disk by embedding-space signature |
-| `test.rs`     | Unit tests for all of the above                                      |
+| `mod_tests.rs` | Unit tests for all of the above                                      |
 
 The agent loop (`agent_loop/run_loop.rs`, `agent_loop/tools.rs`) is the only
 consumer: it builds the catalogue once per run, appends the `tool_search`
