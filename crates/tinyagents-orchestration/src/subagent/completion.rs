@@ -103,7 +103,9 @@ impl CompletionOrigin {
         let result = CompletionResult {
             text,
             omitted_chars,
-            artifact: outcome.artifacts.first().map(CompletionArtifact::from),
+            // An overflow artifact is appended by the result policy, so the last
+            // reference is the one holding the full output.
+            artifact: outcome.artifacts.last().map(CompletionArtifact::from),
         };
         Some(self.record(status, result))
     }

@@ -268,11 +268,13 @@ impl CompletionStore for JsonlCompletionStore {
             let kept: Vec<&CompletionRecord> =
                 map.values().filter(|r| !expired(r, now, retain)).collect();
             let tmp = self.path.with_extension("jsonl.tmp");
-            let mut out = {
+            let _ = std::fs::remove_file(&tmp);
+            let out = {
+                // Append mode, so the handle that becomes the live log keeps
+                // O_APPEND semantics (a rolled-back write cannot leave a hole).
                 let mut out = std::fs::OpenOptions::new()
-                    .create(true)
-                    .truncate(true)
-                    .write(true)
+                    .create_new(true)
+                    .append(true)
                     .open(&tmp)
                     .map_err(|e| store_err("create compaction file", e))?;
                 for record in &kept {
@@ -294,8 +296,6 @@ impl CompletionStore for JsonlCompletionStore {
             }
             // The handle that wrote the compacted file follows its inode across
             // the rename, so the swap and the handle change are one step.
-            std::io::Seek::seek(&mut out, std::io::SeekFrom::End(0))
-                .map_err(|e| store_err("seek compacted log", e))?;
             *file = out;
             let keep: std::collections::HashSet<String> =
                 kept.iter().map(|r| r.task_id.clone()).collect();
