@@ -283,13 +283,23 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
         })
     }
 
+    /// Resolves the run's [`ToolGate`]: the exact allowlist from
+    /// [`Self::resolve_tool_allowlist`], the harness policy's
+    /// [`tool_rules`](crate::runtime::RunPolicy::tool_rules) and, on a hosted
+    /// run, the resolved definition's own rules. Every listing and admission
+    /// site asks this one gate, so the catalogue, `tool_search` and dispatch
+    /// cannot disagree about a tool.
+    pub(super) fn resolve_tool_gate(&self, ctx: &RunContext<Ctx>) -> Result<ToolGate> {
+        let allowed = self.resolve_tool_allowlist(ctx)?;
+        let binding = crate::runtime::host_invocation_binding::<State, Ctx>(ctx)?;
+        let definition_rules = binding.as_ref().and_then(|b| b.tool_rules.as_ref());
+        Ok(ToolGate::new(allowed, &self.policy.tool_rules, definition_rules))
+    }
+
     /// Builds the run's deferred-tool catalogue: every
-    /// [`tinytools::ToolExposure::Deferred`] registration the host allow-list
-    /// admits, or an empty catalogue when discovery is disabled.
-    pub(super) fn deferred_catalog(
-        &self,
-        host_allows: &dyn Fn(&str) -> bool,
-    ) -> crate::tool::discover::DeferredCatalog {
+    /// [`tinytools::ToolExposure::Deferred`] registration the gate lets the
+    /// model search for, or an empty catalogue when discovery is disabled.
+    pub(super) fn deferred_catalog(&self, gate: &ToolGate) -> crate::tool::discover::DeferredCatalog {
         if !self.policy.discovery.enabled {
             return crate::tool::discover::DeferredCatalog::default();
         }
@@ -297,7 +307,13 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
             .tools
             .deferred_schemas_with_families()
             .into_iter()
-            .filter(|(schema, _)| host_allows(&schema.name))
+            .filter(|(schema, _)| {
+                gate.lists(
+                    &schema.name,
+                    self.tools.get(&schema.name).as_deref(),
+                    tinytools::Surface::Search,
+                )
+            })
             .collect::<Vec<_>>();
         if let Some(preparation) = &self.policy.tool_schemas {
             let families: Vec<Option<String>> =
@@ -334,13 +350,8 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
         // `fail_closed_tool_allowlist` policy as the direct tool set built in
         // `run_loop_body` — an empty declared list never falls back to
         // "unrestricted" here either.
-        let allowed_tools = self.resolve_tool_allowlist(ctx)?;
-        let host_allows = |name: &str| {
-            allowed_tools
-                .as_ref()
-                .is_none_or(|allowed| allowed.contains(name))
-        };
-        let catalog = self.deferred_catalog(&host_allows);
+        let gate = self.resolve_tool_gate(ctx)?;
+        let catalog = self.deferred_catalog(&gate);
         if catalog.is_empty() {
             // Nothing was deferred, so the bridge was never advertised; let
             // the call fall through to the unknown-tool policy.
@@ -576,6 +587,29 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
         // execution and must not overwrite what the gate evaluates.
         let model_arguments = call.arguments.clone();
 
+        // Tool rules, before any hook runs, so an approval middleware never
+        // asks a human about a call the rules refuse. Evaluated against the
+        // registered tool (an unregistered name falls through to the
+        // unknown-tool policy below) and any target it dispatches to, on the
+        // raw provider arguments the host gate also sees.
+        let gate = self.resolve_tool_gate(ctx)?;
+        let mut rule_approval = tinytools::ApprovalDirective::Default;
+        if gate.allows_name(&call.name)
+            && let Some(dispatch) = self.tools.model_dispatch(&call.name)
+        {
+            match gate.admit_call(dispatch.tool().as_ref(), &model_arguments) {
+                CallGate::Admit(approval) => rule_approval = approval,
+                CallGate::Refuse(message) => {
+                    ctx.limits.rollback_tool_calls(1);
+                    return Ok(ResolvedToolCall::Answered(with_refusal_metadata(
+                        ctx,
+                        &call.id,
+                        tinytools::ToolResult::error(message),
+                    )));
+                }
+            }
+        }
+
         // The slot is *reserved* above (cap-first, so a middleware hook never
         // runs for a call the budget has already refused) and *released* here
         // when `before_tool` refuses the call — an approval denial or an
@@ -670,10 +704,7 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
         // Hosted turns carry an explicit definition allowlist. Do not merely
         // hide disallowed schemas: a model can still fabricate a name, so the
         // dispatch boundary must reject it too.
-        let allowed_tools = self.resolve_tool_allowlist(ctx)?;
-        let is_allowed = allowed_tools
-            .as_ref()
-            .is_none_or(|allowed| allowed.contains(&call.name));
+        let is_allowed = gate.allows_name(&call.name);
         let (dispatch, tool) = match is_allowed
             .then(|| self.tools.model_dispatch(&call.name))
             .flatten()
@@ -708,10 +739,12 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
                     UnknownToolPolicy::Rewrite { tool_name } => self
                         .tools
                         .dispatch(tool_name)
-                        .filter(|_| {
-                            allowed_tools
-                                .as_ref()
-                                .is_none_or(|allowed| allowed.contains(tool_name))
+                        .filter(|dispatch| {
+                            gate.allows_name(tool_name)
+                                && matches!(
+                                    gate.admit_call(dispatch.tool().as_ref(), &arguments),
+                                    CallGate::Admit(_)
+                                )
                         })
                         .map(|dispatch| (tool_name.clone(), dispatch)),
                     _ => None,
@@ -740,16 +773,15 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
                     // `unknown_tool`). The attempted arguments are echoed in the
                     // message and kept on the `UnknownToolCall` event. This consumed one tool-call
                     // budget slot above, bounding the loop.
-                    let host_allows = |name: &str| {
-                        allowed_tools
-                            .as_ref()
-                            .is_none_or(|allowed| allowed.contains(name))
-                    };
                     let available = self
                         .tools
                         .model_callable_names()
                         .into_iter()
-                        .filter(|name| host_allows(name))
+                        .filter(|name| {
+                            self.tools
+                                .get(name)
+                                .is_some_and(|tool| gate.lists_tool(tool.as_ref()))
+                        })
                         .collect::<Vec<_>>();
                     // A host-registered `tool_search` takes precedence over the
                     // intrinsic bridge (see `admit_tool_call`), so only advertise
@@ -758,7 +790,7 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
                         .tools
                         .dispatch(crate::tool::discover::TOOL_SEARCH_NAME)
                         .is_none()
-                        && !self.deferred_catalog(&host_allows).is_empty();
+                        && !self.deferred_catalog(&gate).is_empty();
                     let message = super::unknown_tool::unknown_tool_message(
                         &requested,
                         &arguments,
@@ -886,7 +918,15 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
                 )));
             }
             let policy = tool.policy();
-            if policy.access.approval_required {
+            // A `require_approval` rule defers like a declared
+            // `approval_required`; an `auto_approve` rule waives the
+            // declaration (a stricter rule elsewhere already won).
+            let needs_approval = match rule_approval {
+                tinytools::ApprovalDirective::Required => true,
+                tinytools::ApprovalDirective::Waived => false,
+                tinytools::ApprovalDirective::Default => policy.access.approval_required,
+            };
+            if needs_approval {
                 ctx.limits.rollback_tool_calls(1);
                 let metadata = serde_json::to_value(&policy.display)
                     .ok()
