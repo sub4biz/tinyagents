@@ -521,7 +521,7 @@ where
     // arbitrary default.
     if let Some(control) = ctx.take_control() {
         let result = apply_control(ctx, &mut loop_state, control, node::MODEL, route);
-        retract_on_interrupt(ctx, &result, entry_len);
+        retract_on_interrupt(harness, ctx, &result, entry_len);
         return result;
     }
     // Stash the response for `settle` to extract structured output from.
@@ -590,11 +590,15 @@ where
             }
             return Ok(goto(loop_state, node::SETTLE));
         }
-        Err(error) => return Err(error),
+        Err(error) => {
+            // Results of calls that ran before the failure are on the node's
+            // transcript, which the error path would otherwise drop; keep them
+            // on the run, as the direct loop does, so the driver's final
+            // lifecycle close announces and counts them.
+            run.messages = loop_state.messages.clone();
+            return Err(error);
+        }
     };
-    // Every tool result of this batch is on the transcript: announce them and
-    // close the turn, as the direct loop does after its batch.
-    phases::lifecycle_close_turn(harness, ctx, &loop_state.messages);
     loop_state.tool_calls = run.tool_calls;
     loop_state.executed_tools = run.executed_tools.clone();
     let _ = outcome;
@@ -605,9 +609,14 @@ where
 
     if let Some(control) = ctx.take_control() {
         let result = apply_control(ctx, &mut loop_state, control, node::TOOLS, node::PLAN);
-        retract_on_interrupt(ctx, &result, entry_len);
+        if !retract_on_interrupt(harness, ctx, &result, entry_len) {
+            // Every tool result of this batch is on the transcript: announce
+            // them and close the turn, as the direct loop does after its batch.
+            phases::lifecycle_close_turn(harness, ctx, &loop_state.messages);
+        }
         return result;
     }
+    phases::lifecycle_close_turn(harness, ctx, &loop_state.messages);
 
     Ok(goto(loop_state, node::PLAN))
 }
@@ -619,20 +628,26 @@ where
 /// state on resume, so the appends it already announced are retracted: the
 /// re-run announces them again, and events never name a message the kept
 /// transcript lacks.
-fn retract_on_interrupt<Ctx>(
+fn retract_on_interrupt<State: Send + Sync, Ctx: Send + Sync>(
+    harness: &AgentHarness<State, Ctx>,
     ctx: &mut RunContext<Ctx>,
     result: &Result<NodeResult<LoopState>>,
     entry_len: usize,
-) {
-    if matches!(result, Ok(NodeResult::Interrupt(_))) {
-        tracing::debug!(
-            target: "tinyagents::agent_loop",
-            run_id = %ctx.run_id(),
-            entry_len,
-            "[graph_loop] node interrupted; retracting its announced appends"
-        );
-        phases::lifecycle_retract(ctx, entry_len);
+) -> bool {
+    if !matches!(result, Ok(NodeResult::Interrupt(_))) {
+        return false;
     }
+    tracing::debug!(
+        target: "tinyagents::agent_loop",
+        run_id = %ctx.run_id(),
+        entry_len,
+        "[graph_loop] node interrupted; retracting its announced appends"
+    );
+    phases::lifecycle_retract(ctx, entry_len);
+    // Close the turn the node opened: a fresh runtime resuming from the
+    // checkpoint cannot carry this tracker's open turn over.
+    phases::lifecycle_close_turn(harness, ctx, &[]);
+    true
 }
 
 pub(crate) async fn settle_node<State, Ctx>(

@@ -432,15 +432,12 @@ async fn an_interrupt_after_the_tool_batch_retracts_instead_of_closing_the_turn(
         fn name(&self) -> &str {
             "pause_after_tools"
         }
-        fn should_stop_after_turn(&self, _: &mut RunContext<()>, _: &tinyagents_harness::middleware::AgentRun) -> bool {
-            false
-        }
         async fn after_tool(
             &self,
             ctx: &mut RunContext<()>,
             _state: &(),
-            _call: &ToolCall,
-            _result: &mut tinytools::ToolResult,
+            _invocation: &tinyagents_harness::middleware::ToolInvocationIdentity,
+            _result: &mut ToolResult,
         ) -> tinyagents_harness::Result<()> {
             if self.0.swap(false, std::sync::atomic::Ordering::SeqCst) {
                 ctx.request_control(MiddlewareControl::Interrupt {
