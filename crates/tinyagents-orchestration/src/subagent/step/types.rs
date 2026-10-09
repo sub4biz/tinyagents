@@ -62,7 +62,7 @@ pub struct AgentStepIdentity {
     pub parent_run_id: String,
     /// Id of this step inside the parent run.
     pub task_id: String,
-    /// Name checked against [`SpawnPolicy::allowed_targets`](super::SpawnPolicy).
+    /// Name checked against [`SpawnPolicy::allowed_targets`](crate::subagent::SpawnPolicy).
     pub target: Option<String>,
 }
 
@@ -197,7 +197,7 @@ pub struct StepContext {
     pub cancellation: CancellationToken,
     /// The configured delegation role the worker must enforce.
     pub role: SubagentRole,
-    /// Model-call cap from [`SubAgentBudget`](super::SubAgentBudget) call caps
+    /// Model-call cap from [`SubAgentBudget`](crate::subagent::SubAgentBudget) call caps
     /// (already tightened onto the child's `RunConfig`); the worker must
     /// enforce it, as the crate cannot count an opaque worker's calls.
     pub max_model_calls: Option<usize>,
