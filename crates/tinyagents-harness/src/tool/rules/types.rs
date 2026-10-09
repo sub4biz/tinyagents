@@ -130,6 +130,31 @@ impl ToolGate {
         self.lists(tool.name(), Some(tool), surface)
     }
 
+    /// The rules' answer for a harness-intrinsic tool such as the
+    /// `tool_search` bridge, on `surface`.
+    ///
+    /// Intrinsics are not registrations, so a definition's exact allowlist
+    /// (which names registered tools) does not apply; the rules do, so a
+    /// host can withhold discovery itself.
+    pub(crate) fn admits_intrinsic(&self, name: &str, surface: Surface) -> CallGate {
+        let Some(rules) = &self.rules else {
+            return CallGate::Admit(ApprovalDirective::Default);
+        };
+        let decision = rules.evaluate(&ToolSubject::named(name), &self.context, surface, None);
+        if decision.admits(surface) {
+            CallGate::Admit(decision.approval)
+        } else {
+            tracing::debug!(
+                target: "tinyagents::tool_rules",
+                tool = %name,
+                surface = ?surface,
+                rule = ?decision.blocked_by,
+                "[tool_rules] intrinsic tool withheld"
+            );
+            CallGate::Refuse(decision.refusal(name))
+        }
+    }
+
     /// Decides a concrete call. The allowlist is checked by the caller before
     /// lookup; this applies the rules, including any indirect target.
     pub(crate) fn admit_call(&self, tool: &dyn Tool, args: &Value) -> CallGate {

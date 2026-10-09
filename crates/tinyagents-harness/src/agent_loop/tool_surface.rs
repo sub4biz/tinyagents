@@ -42,8 +42,11 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
             })
             .collect::<Vec<_>>();
         if let Some(toolset) = &self.toolset {
-            let existing: HashSet<&str> =
-                schemas.iter().map(|schema| schema.name.as_str()).collect();
+            // Every registered name, listed or not: a registered tool owns its
+            // name even when the rules keep it off this catalogue, so a
+            // toolset tool may never take its place on the wire.
+            let registered = self.tools.names();
+            let existing: HashSet<&str> = registered.iter().map(String::as_str).collect();
             let extra: Vec<_> = toolset
                 .tools(ctx)
                 .await?
@@ -102,7 +105,14 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
                 .collect();
         let promoted_names: BTreeSet<String> = promoted_schemas.keys().cloned().collect();
         let recorded_promotions = promoted_names.clone();
-        if !deferred_catalog.is_empty() {
+        let bridge_listed = matches!(
+            gate.admits_intrinsic(
+                crate::tool::discover::TOOL_SEARCH_NAME,
+                tinytools::Surface::Catalog
+            ),
+            crate::tool::CallGate::Admit(_)
+        );
+        if bridge_listed && !deferred_catalog.is_empty() {
             // A host-registered `tool_search` keeps its slot: the intrinsic
             // bridge only fills a name nobody registered. Check the full
             // registry (`self.tools.dispatch`), not just the direct set — a

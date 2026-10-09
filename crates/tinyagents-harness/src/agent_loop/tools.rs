@@ -374,6 +374,16 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
         // `run_loop_body` — an empty declared list never falls back to
         // "unrestricted" here either.
         let gate = self.resolve_tool_gate(ctx)?;
+        if let CallGate::Refuse(message) =
+            gate.admits_intrinsic(TOOL_SEARCH_NAME, tinytools::Surface::Call)
+        {
+            // Discovery itself is ruled out: refuse rather than answer, so the
+            // bridge cannot reveal what the rules withhold from the model.
+            ctx.limits.rollback_tool_calls(1);
+            return Ok(Some(ResolvedToolCall::Answered(
+                tinytools::ToolResult::error(message),
+            )));
+        }
         let catalog = self.deferred_catalog(&gate);
         if catalog.is_empty() {
             // Nothing was deferred, so the bridge was never advertised; let
