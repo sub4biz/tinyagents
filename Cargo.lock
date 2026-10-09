@@ -1889,6 +1889,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tinyagents-harness",
+ "tinyagents-tasks",
  "tinystoragedrivers-core",
  "tinystoragedrivers-sqlite",
  "tinytools-agent",

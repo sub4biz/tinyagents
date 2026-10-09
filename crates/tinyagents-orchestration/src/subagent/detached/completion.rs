@@ -73,11 +73,10 @@ impl DetachedCompletionTarget {
         task_id: &str,
         status: &DetachedSubagentStatus,
     ) -> Option<CompletionRecord> {
-        let (state, text) = match status {
-            DetachedSubagentStatus::Completed { output, .. } => {
-                (CompletionStatus::Success, output.clone())
-            }
-            DetachedSubagentStatus::Failed { error } => (CompletionStatus::Failed, error.clone()),
+        let state = CompletionStatus::try_from(status).ok()?;
+        let text = match status {
+            DetachedSubagentStatus::Completed { output, .. } => output.clone(),
+            DetachedSubagentStatus::Failed { error } => error.clone(),
             DetachedSubagentStatus::Running | DetachedSubagentStatus::AwaitingUser { .. } => {
                 return None;
             }

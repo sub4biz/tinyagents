@@ -15,6 +15,7 @@ mod detached;
 mod driver;
 mod executor;
 mod invocation;
+mod outcome_status_map;
 mod persistence;
 mod planner;
 mod policy;

@@ -1,34 +1,65 @@
 //! Conversions from [`DetachedSubagentStatus`] to the other status
 //! vocabularies. The payloads (output, question, error) are dropped; only the
-//! lifecycle state maps. See the crate README for the full map.
+//! lifecycle state maps. See the `tinyagents-tasks` README for the full map.
 
 use tinyagents_session::run_ledger::AgentRunStatus;
-use tinyagents_tasks::OrchestrationTaskStatus;
+use tinyagents_tasks::{CompletionStatus, NoEquivalentStatus, OrchestrationTaskStatus};
 
 use super::types::DetachedSubagentStatus;
-use crate::status::NoEquivalentStatus;
 use crate::subagent::SubAgentJobStatus;
 
 impl DetachedSubagentStatus {
-    /// The managed-task status for this state. `AwaitingUser` maps to
+    /// The managed-task status for this state; same as
+    /// `OrchestrationTaskStatus::from(&status)`. `AwaitingUser` maps to
     /// `Awaiting`, which (unlike [`Self::is_terminal`]) is a live task state.
     pub fn to_task_status(&self) -> OrchestrationTaskStatus {
-        match self {
-            Self::Running => OrchestrationTaskStatus::Running,
-            Self::Completed { .. } => OrchestrationTaskStatus::Completed,
-            Self::AwaitingUser { .. } => OrchestrationTaskStatus::Awaiting,
-            Self::Failed { .. } => OrchestrationTaskStatus::Failed,
-        }
+        self.into()
     }
 
-    /// The run-ledger status for this state. `AwaitingUser` maps to
-    /// `AwaitingUser`, a live ledger state.
+    /// The run-ledger status for this state; same as
+    /// `AgentRunStatus::from(&status)`. `AwaitingUser` maps to `AwaitingUser`,
+    /// a live ledger state.
     pub fn to_run_status(&self) -> AgentRunStatus {
-        match self {
-            Self::Running => AgentRunStatus::Running,
-            Self::Completed { .. } => AgentRunStatus::Completed,
-            Self::AwaitingUser { .. } => AgentRunStatus::AwaitingUser,
-            Self::Failed { .. } => AgentRunStatus::Failed,
+        self.into()
+    }
+}
+
+/// Drops the payload; `AwaitingUser` -> `Awaiting`.
+impl From<&DetachedSubagentStatus> for OrchestrationTaskStatus {
+    fn from(status: &DetachedSubagentStatus) -> Self {
+        match status {
+            DetachedSubagentStatus::Running => Self::Running,
+            DetachedSubagentStatus::Completed { .. } => Self::Completed,
+            DetachedSubagentStatus::AwaitingUser { .. } => Self::Awaiting,
+            DetachedSubagentStatus::Failed { .. } => Self::Failed,
+        }
+    }
+}
+
+/// Drops the payload; `AwaitingUser` -> `AwaitingUser`.
+impl From<&DetachedSubagentStatus> for AgentRunStatus {
+    fn from(status: &DetachedSubagentStatus) -> Self {
+        match status {
+            DetachedSubagentStatus::Running => Self::Running,
+            DetachedSubagentStatus::Completed { .. } => Self::Completed,
+            DetachedSubagentStatus::AwaitingUser { .. } => Self::AwaitingUser,
+            DetachedSubagentStatus::Failed { .. } => Self::Failed,
+        }
+    }
+}
+
+/// Only a finished run is a completion. `Running` and `AwaitingUser` (a pause:
+/// the same task completes later) fail with [`NoEquivalentStatus`].
+impl TryFrom<&DetachedSubagentStatus> for CompletionStatus {
+    type Error = NoEquivalentStatus;
+
+    fn try_from(status: &DetachedSubagentStatus) -> Result<Self, Self::Error> {
+        match status {
+            DetachedSubagentStatus::Completed { .. } => Ok(Self::Success),
+            DetachedSubagentStatus::Failed { .. } => Ok(Self::Failed),
+            DetachedSubagentStatus::Running | DetachedSubagentStatus::AwaitingUser { .. } => {
+                Err(NoEquivalentStatus::new(status.label(), "CompletionStatus"))
+            }
         }
     }
 }

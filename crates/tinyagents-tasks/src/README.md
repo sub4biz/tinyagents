@@ -45,8 +45,10 @@ call `orchestration_tools` to build the full set, or call
 
 - `OrchestrationTaskKind` — what a task *is* (subgraph run, sub-agent run,
   ...); `as_str()`.
-- `OrchestrationTaskStatus` — lifecycle state; `is_terminal()` / `is_live()`
-  predicates.
+- `OrchestrationTaskStatus` — the one durable lifecycle status for a subagent
+  or task run; `is_terminal()` / `is_live()` predicates. See
+  [Status mapping](#status-mapping).
+- `NoEquivalentStatus` — the error of every fallible status conversion.
 - `OrchestrationTaskSpec` — the request to spawn a task: kind, lineage
   (thread/node), timeout, input payload, metadata. Built with `new` +
   `with_lineage` / `with_thread` / `with_node` / `with_timeout_ms` /
@@ -178,12 +180,48 @@ idle, the delivery turn, its formatter, and what to do with a `GaveUp` record.
 `spawn_status_watcher_with_completions`; with no router configured its behaviour
 is unchanged.
 
+## Status mapping
+
+`OrchestrationTaskStatus` is canonical. Every other subagent-run status enum
+keeps its own (unchanged) wire format and converts to it; the payload-free ones
+(`AgentRunStatus`, `TranscriptSubagentStatus`, `CompletionStatus`,
+`SubAgentJobStatus`) also convert back. `From` is total; `TryFrom` fails with `NoEquivalentStatus`. `DetachedSubagentStatus`
+carries a payload (output, question, error), as does `SubagentOutcomeKind`; both only convert out, by
+reference (`From<&DetachedSubagentStatus>`, and `TryFrom<&_>` for `CompletionStatus`/`SubAgentJobStatus`); there is no reverse conversion because the payload cannot be reconstructed from a bare status.
+
+| Type (crate) | -> `OrchestrationTaskStatus` | `OrchestrationTaskStatus` -> |
+| --- | --- | --- |
+| `DetachedSubagentStatus` (orchestration) | `From<&_>`: `Running`, `Completed`, `Failed`; `AwaitingUser` -> `Awaiting` | none (no payload to rebuild) |
+| `SubAgentJobStatus` (orchestration) | `From`: `Queued` -> `Pending`; `Incomplete` -> `Failed` (`SubAgentJob::task_status()` refines a timeout to `TimedOut`) | `TryFrom`: `CancelRequested` -> `Running`; `TimedOut` -> `Incomplete`; `Awaiting`, `Abandoned` -> error |
+| `SubagentOutcomeKind` (orchestration) | `From<&_>`: `AwaitingInput` -> `Awaiting`; `Incomplete` + `Timeout` -> `TimedOut`, other `Incomplete` -> `Failed` | none (payload) |
+| `AgentRunStatus` (session) | `From`: `AwaitingUser`, `Paused` -> `Awaiting`; `Interrupted` -> `Abandoned` | `From`: `CancelRequested` -> `Running`; `TimedOut` -> `Failed`; `Abandoned` -> `Interrupted`; `Awaiting` -> `AwaitingUser` |
+| `TranscriptSubagentStatus` (session) | `From`: `Incomplete` -> `Failed`; `Interrupted` -> `Abandoned` | `TryFrom`: live states -> `Running`; `TimedOut` -> `Incomplete`; `Abandoned` -> `Interrupted`; `Cancelled` -> error |
+| `CompletionStatus` (tasks) | `From`: `Success` -> `Completed`, `Failed` -> `Failed`, `Cancelled` -> `Cancelled`, `Incomplete` -> `Failed` | `TryFrom`: `Completed` -> `Success`, `Failed` -> `Failed`, `Cancelled` -> `Cancelled`, `TimedOut`, `Abandoned` -> `Incomplete`; live states (`Pending`, `Running`, `Awaiting`, `CancelRequested`) -> error |
+
+The other pairs convert directly where both sides have a meaningful value:
+`SubAgentJobStatus` <-> `AgentRunStatus` (`From` out, `TryFrom` back; `Incomplete`
+-> `Failed`; `AwaitingUser`, `Paused`, `Interrupted` -> error), `SubAgentJobStatus`
+<-> `CompletionStatus` (`From` in, `TryFrom` out; `Queued`, `Running` -> error),
+and `DetachedSubagentStatus` / `SubagentOutcomeKind` -> `AgentRunStatus`,
+`SubAgentJobStatus` and `CompletionStatus` (`AwaitingUser` / `AwaitingInput`
+pause states and `Running` -> error where there is no equivalent). Two caveats: the canonical status has no `Incomplete`, so the direct job/outcome <-> `CompletionStatus` pairs keep the incomplete-vs-failed distinction that a trip through `OrchestrationTaskStatus` loses; and `detached/ledger.rs` (`record_to_wait_outcome`) folds a stored task status back into `DetachedSubagentStatus`, mapping `TimedOut`, `Abandoned` and `Cancelled` to `Failed`.
+
+Terminality is preserved by every mapping, except that
+`DetachedSubagentStatus::is_terminal` treats `AwaitingUser` as terminal (the
+run will not progress by itself) while the task status keeps it live so a
+follow-up can resume it. Lossy collapses are the ones named above; each is
+pinned by an exhaustive test. Serde forms (`snake_case` strings, plus the
+externally-tagged `SubagentOutcomeKind`) are unchanged and pinned by golden
+tests; the deprecated aliases and helpers are listed in the orchestration
+README.
+
 ## Files
 
 | File | Role |
 | --- | --- |
 | `lib.rs` | Module declarations and re-exports. |
-| `types.rs` | Task kind/status/spec/result/record/filter types, `OrchestrationToolKind`, `OrchestrationControlOutcome`, and the `DetachedTaskRegistry` snapshot/error types. |
+| `status.rs` | The `CompletionStatus` <-> `OrchestrationTaskStatus` conversions (tests in `status_tests.rs`); `NoEquivalentStatus` itself is in `types.rs`. |
+| `types.rs` | `NoEquivalentStatus`, task kind/status/spec/result/record/filter types, `OrchestrationToolKind`, `OrchestrationControlOutcome`, and the `DetachedTaskRegistry` snapshot/error types. |
 | `tool.rs` | `OrchestrationTool`, `SteeringRegistry`, tool constructors and schemas. |
 | `store.rs` | `TaskStore` trait, `InMemoryTaskStore`, `JsonlTaskStore`. |
 | `store_registry.rs` | `TaskStoreRegistry<K>`, `open_jsonl_task_store_or_memory`. |

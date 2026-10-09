@@ -19,6 +19,7 @@ mod completions;
 mod reconcile;
 mod recovery;
 mod runtime;
+mod status;
 mod store;
 mod store_registry;
 mod tool;
