@@ -5,6 +5,7 @@
 //! lookup, name listing, and schema collection.
 
 use super::*;
+use tinytools::*;
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
