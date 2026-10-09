@@ -185,8 +185,7 @@ impl<State> DriverCheckpointer<State> {
     /// Every stored checkpoint document of `thread`, in insertion order.
     async fn thread_docs(&self, thread: &str) -> Result<Vec<Versioned<Value>>> {
         self.declared().await?;
-        let query = Query::filter(Filter::eq("thread", thread))
-            .sort(Sort::asc("seq"));
+        let query = Query::filter(Filter::eq("thread", thread)).sort(Sort::asc("seq"));
         self.docs
             .query_all(&self.checkpoints, &query)
             .await
