@@ -378,8 +378,8 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
             gate.admits_intrinsic(TOOL_SEARCH_NAME, tinytools::Surface::Call)
         {
             // Discovery itself is ruled out: refuse rather than answer, so the
-            // bridge cannot reveal what the rules withhold from the model.
-            ctx.limits.rollback_tool_calls(1);
+            // bridge cannot reveal what the rules withhold from the model. Like
+            // the other answered recoveries, the call keeps its budget slot.
             return Ok(Some(ResolvedToolCall::Answered(
                 tinytools::ToolResult::error(message),
             )));
