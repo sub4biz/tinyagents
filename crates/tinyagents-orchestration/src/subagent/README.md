@@ -221,6 +221,8 @@ attempt, no trimming), so `run_member_graph` and a `WorkflowEngine` without
 than adapters: graph cannot depend on orchestration. Their behaviour is
 unchanged; `SubAgentPolicy` is shared and not deprecated.
 
+`StepContext` hands the worker the role and the model/tool call caps (`max_model_calls`, `max_tool_calls`) to enforce, since the crate cannot count an opaque worker's calls.
+
 ## Breaking changes
 
 None of the new structs hosts build is `#[non_exhaustive]`; use the constructors

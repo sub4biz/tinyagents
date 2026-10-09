@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use tinyagents_harness::retry::RetryPolicy;
 
-use crate::subagent::{IncompleteKind, SpawnPolicy};
+use crate::subagent::{IncompleteKind, SpawnPolicy, SubAgentPolicy, SubagentRole};
 
 fn ident(task: &str) -> AgentStepIdentity {
     AgentStepIdentity::new("parent", task)
@@ -184,4 +184,30 @@ async fn worker_receives_the_configured_role() {
     .await
     .unwrap();
     assert_eq!(result.outcome.output, "Leaf");
+}
+
+#[tokio::test]
+async fn call_caps_reach_the_worker_through_the_context() {
+    use crate::subagent::SubAgentBudget;
+    let config = AgentStepConfig::default().with_policy(
+        SubAgentPolicy::default().with_budget(
+            SubAgentBudget::default()
+                .with_max_model_calls(3)
+                .with_max_tool_calls(5),
+        ),
+    );
+    let result = run_agent_step(
+        &config,
+        ident("a"),
+        CancellationToken::new(),
+        |ctx| async move {
+            Ok(StepSuccess::new(
+                format!("{:?}/{:?}", ctx.max_model_calls, ctx.max_tool_calls),
+                (),
+            ))
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(result.outcome.output, "Some(3)/Some(5)");
 }

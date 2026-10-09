@@ -30,7 +30,7 @@ completions, and inter-member messages.
   Retry, token budget and role need worker-reported transient failures / usage /
   a tool surface that `MemberOutcome` does not carry, so they do not take
   effect through this adapter (use `subagent::run_agent_step` directly).
-  `MemberStep::default()` shares one scope and has no target: give a limited
+  `MemberStep::with_cancellation` ties a step to the run's token (a pre-cancelled member never runs and goes to `on_failed`). `MemberStep::default()` shares one scope and has no target: give a limited
   config a real `MemberStep::new(config, team, member)`.
   A completed run goes to `on_complete` with the policy-trimmed output; a
   spawn rejection, timeout, exceeded budget or worker-reported failure goes to

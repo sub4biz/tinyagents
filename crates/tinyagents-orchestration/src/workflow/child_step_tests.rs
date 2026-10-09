@@ -168,3 +168,32 @@ async fn schema_and_cap_together_keep_the_display_text_for_truncation() {
     let states = drive(&engine, &store).await;
     assert_eq!(states["plan"]["outputs"][0]["output"], json!("plan output"));
 }
+
+#[tokio::test]
+async fn pre_cancelled_child_never_reaches_the_executor() {
+    struct NoRegistration;
+    impl WorkflowChildRegistration for NoRegistration {
+        fn register(&self, _: String) -> Result<(), OrchestrationError> {
+            Ok(())
+        }
+    }
+    let executor = Arc::new(FakeExecutor::default());
+    let token = CancellationToken::new();
+    token.cancel();
+    let result = run_child_step(
+        &AgentStepConfig::default(),
+        executor.clone(),
+        WorkflowChildRequest {
+            run_id: "run".into(),
+            phase: "plan".into(),
+            agent_id: "planner".into(),
+            index_in_phase: 0,
+            prompt: "p".into(),
+        },
+        token,
+        Arc::new(NoRegistration),
+    )
+    .await;
+    assert!(result.is_err());
+    assert!(executor.calls.lock().is_empty(), "no child was executed");
+}

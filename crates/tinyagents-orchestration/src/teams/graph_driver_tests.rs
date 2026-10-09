@@ -151,3 +151,34 @@ async fn default_step_is_neutral_and_worker_errors_still_fail_the_graph() {
     .unwrap_err();
     assert!(err.to_string().contains("worker exploded"), "{err}");
 }
+
+#[tokio::test]
+async fn pre_cancelled_member_never_runs_its_worker() {
+    let seen = Seen::default();
+    let token = CancellationToken::new();
+    token.cancel();
+    let step = MemberStep::default().with_cancellation(token);
+    let f = seen.failed.clone();
+    let ran = Arc::new(Mutex::new(0u32));
+    let counter = ran.clone();
+    run_member_graph_with(
+        None,
+        step,
+        move || {
+            *counter.lock().unwrap() += 1;
+            async { Ok(done("never")) }
+        },
+        |_| async { Ok(()) },
+        move |r| {
+            let f = f.clone();
+            async move {
+                f.lock().unwrap().push(r);
+                Ok(())
+            }
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(*ran.lock().unwrap(), 0);
+    assert!(seen.failed.lock().unwrap()[0].contains("cancelled"));
+}

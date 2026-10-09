@@ -39,6 +39,10 @@ pub struct MemberStep {
     pub config: AgentStepConfig,
     /// Team (admission scope) and member (task id, allowlist target).
     pub identity: AgentStepIdentity,
+    /// Lifecycle cancellation of the enclosing run. A token cancelled before
+    /// the step starts keeps the worker from running (the member is routed to
+    /// `on_failed`); cancelling it later cancels the worker's child token.
+    pub cancellation: CancellationToken,
 }
 
 impl MemberStep {
@@ -53,7 +57,14 @@ impl MemberStep {
         Self {
             config,
             identity: AgentStepIdentity::new(team_id, member_id.clone()).with_target(member_id),
+            cancellation: CancellationToken::new(),
         }
+    }
+
+    /// Ties the step to the enclosing run's cancellation token.
+    pub fn with_cancellation(mut self, cancellation: CancellationToken) -> Self {
+        self.cancellation = cancellation;
+        self
     }
 }
 
@@ -62,6 +73,7 @@ impl Default for MemberStep {
         Self {
             config: AgentStepConfig::default(),
             identity: AgentStepIdentity::new("team", "member"),
+            cancellation: CancellationToken::new(),
         }
     }
 }
@@ -175,7 +187,7 @@ where
     let result = run_agent_step(
         &step.config,
         step.identity.clone(),
-        CancellationToken::new(),
+        step.cancellation.clone(),
         move |_ctx| {
             let fut = run_worker();
             async move {
@@ -227,6 +239,9 @@ where
                 reason: error.to_string(),
             })
         }
+        Err(AgentStepError::Cancelled) => Ok(MemberOutcome::Failed {
+            reason: "member step was cancelled".to_owned(),
+        }),
         Err(error) => Err(anyhow::anyhow!("{error}")),
     }
 }
