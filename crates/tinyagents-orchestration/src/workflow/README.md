@@ -55,6 +55,12 @@ collects results, and manages state transitions durably.
   `synthesize_summary()`, etc.
 - **`graph.rs`** — scheduler DAG: models workflow phases as a directed graph
   for topological sorting and dependency resolution.
+- **`child_step.rs`** — runs each agent child through `SubagentDriver`
+  (`subagent::run_agent_step`). `WorkflowEngine::with_step_config` applies an
+  `AgentStepConfig` (spawn admission scoped per workflow run id and targeted
+  at the agent id, timeout/retry/budget, result policy, role). The default is
+  inert; a refused, timed-out or over-budget child fails its phase with the
+  reason, and a result-policy-trimmed output replaces the raw output.
 - **`validate.rs`** — structural validation: no duplicate phases, valid
   dependencies, no cycles, valid concurrency settings, etc.
 - **`tests.rs`** — tests for scheduling, phase transitions, concurrency,

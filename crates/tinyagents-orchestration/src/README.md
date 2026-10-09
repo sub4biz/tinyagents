@@ -20,6 +20,9 @@ on orchestration policy.
   see `subagent/README.md`.
 - `subagent::SubagentDriver` coordinates durable resume, preparation,
   execution, pause, and terminal persistence through host-supplied traits.
+  It is the single engine for an agent step: team member steps and workflow
+  agent children run through it too (`subagent::run_agent_step`), so they get
+  the same spawn admission, policy, result policy and typed outcome.
 
 The direct invocation implementation and its tool-focused tests live in
 `subagent/invocation/`. Durable lifecycle files live beside it in `subagent/`.

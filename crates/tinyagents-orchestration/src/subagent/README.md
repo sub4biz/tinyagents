@@ -197,6 +197,26 @@ child ordinals are consumed, so sibling ids do not depend on retry) and the job'
 has the `Transient` message, so it sees a synthetic tool error. Usage of a failed
 or timed-out attempt is not reported (an error carries no run).
 
+## Agent steps: one engine for teams, workflows and the driver (D11)
+
+`run_agent_step(&AgentStepConfig, AgentStepIdentity, CancellationToken, work)`
+adapts an opaque host worker (a team member closure, a workflow child
+executor) to the driver's planner / executor / in-memory persistence seams and
+runs it on a real `SubagentDriver`. `teams::run_member_graph_with` and
+`WorkflowEngine::with_step_config` call it, so those steps honour `SpawnPolicy`
+admission (scope = team id / workflow run id, target = member / agent id),
+`SubAgentPolicy` timeout, retry (`StepWorkError::Transient`) and token budget,
+`ResultPolicy`, `SubagentRole` and the typed `SubagentOutcomeKind`.
+
+`AgentStepConfig::default()` is inert (unlimited admission, no timeout, one
+attempt, no trimming), so `run_member_graph` and a `WorkflowEngine` without
+`with_step_config` behave as before. A worker `Err` is returned unchanged as
+`AgentStepError::Worker`.
+
+`tinyagents_graph::SubAgentNode` / `subagent_node` are `#[deprecated]` rather
+than adapters: graph cannot depend on orchestration. Their behaviour is
+unchanged; `SubAgentPolicy` is shared and not deprecated.
+
 ## Breaking changes
 
 None of the new structs hosts build is `#[non_exhaustive]`; use the constructors
