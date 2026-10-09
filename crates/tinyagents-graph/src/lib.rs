@@ -119,6 +119,7 @@ pub use stream::{
     CollectingSink, GraphEvent, GraphEventEnvelope, GraphEventSink, NoopSink, StreamMode,
     StreamProjection, project_graph_event,
 };
+#[allow(deprecated)]
 pub use subagent_node::{
     AgentInvocation, AgentInvocationBinding, AgentInvoker, InputMapper, OutputMapper,
     SubAgentBudget, SubAgentInput, SubAgentNode, SubAgentOutput, SubAgentPolicy, subagent_node,
