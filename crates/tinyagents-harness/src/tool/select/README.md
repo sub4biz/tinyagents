@@ -34,7 +34,7 @@ model is allowed to see.
 | --- | --- |
 | `mod.rs` | `rank_tools_by_prompt`, `MIN_CONFIDENT_HITS`, and the full scoring pipeline (verb detection/gate, tokenization, abbreviation expansion, weighted overlap, verb bonus). |
 | `types.rs` | `SelectableTool`, `ToolVerb`. |
-| `test.rs` | Unit tests: verb classification, abbreviation expansion, stopword filtering, ranked overlap scoring. |
+| `mod_tests.rs` | Unit tests: verb classification, abbreviation expansion, stopword filtering, ranked overlap scoring. |
 
 ## Key invariants
 

@@ -75,7 +75,7 @@ crashes mid-execution.
 | `mod.rs` | The `Checkpointer` trait and the in-memory backend. |
 | `file.rs` | `FileCheckpointer`. |
 | `sqlite.rs` | `SqliteCheckpointer` (feature `sqlite`). |
-| `test.rs` | Unit tests (put/get round-trips, namespace scoping, history, pruning). |
+| `mod_tests.rs` | Unit tests (put/get round-trips, namespace scoping, history, pruning). |
 
 ## Operational constraints
 

@@ -64,7 +64,7 @@ one fails closed rather than silently fabricating agent behavior.
 | --- | --- |
 | `types.rs` | `AgentInvocation`, `AgentInvocationBinding`, `AgentInvoker`, `SubAgentInput`, `SubAgentOutput`, `SubAgentBudget`, `SubAgentPolicy`, `InputMapper`, `OutputMapper`, `SubAgentNode`. |
 | `mod.rs` | `SubAgentNode` builders, `subagent_node` (the handler lowering), retry/timeout/budget execution (`run_with_policy`), and child-run recording. |
-| `test.rs` | Unit tests (delegation, mapper wiring, retry/timeout behavior, budget enforcement, child-run recording). |
+| `mod_tests.rs` | Unit tests (delegation, mapper wiring, retry/timeout behavior, budget enforcement, child-run recording). |
 
 ## Operational constraints
 

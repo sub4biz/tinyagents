@@ -88,7 +88,7 @@ backend.
 | `types.rs` | `GraphEventRecorder`, `StreamCollector`, `GraphRun`, `GraphAssertions`, `RetryCountingNode`. |
 | `mod.rs` | Node doubles, `run_recorded`, `assert_graph`. |
 | `conformance.rs` | `checkpointer_contract`, `checkpointer_concurrent_contract`, `checkpointer_writes_contract`, `checkpointer_lineage_contract`, `taskstore_contract`, `taskstore_concurrent_contract`, `taskstore_replay_contract`. |
-| `test.rs` | Unit tests for the testkit itself (each double, recorder, assertion). |
+| `mod_tests.rs` | Unit tests for the testkit itself (each double, recorder, assertion). |
 
 ## Operational constraints
 

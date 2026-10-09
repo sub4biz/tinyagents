@@ -273,7 +273,7 @@ error surfaced by a model, tool, middleware, or structured-output extraction.
 | `model_switch.rs` | Applies a steered `SwitchModel` to the turn request before binding resolution, and decides where a fallback walk starts for a switched model. |
 | `stream.rs` | Caller-consumable streaming entry point (`invoke_stream`/`invoke_stream_in_context`) that projects the run's `EventSink` into an `AgentStreamItem` stream. |
 | `types.rs` | `AgentLoopResult`, `PartialRunOutcome`, and the private `LoopExit`. |
-| `test.rs` | Unit tests (limits, retry/fallback, tool execution, structured extraction). |
+| `mod_tests.rs` | Unit tests (limits, retry/fallback, tool execution, structured extraction). |
 
 ## Operational constraints
 

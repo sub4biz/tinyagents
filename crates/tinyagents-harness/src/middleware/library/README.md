@@ -102,7 +102,7 @@ Grouped by extension shape:
 | `context.rs` | Constructors and `Middleware` impls for `MessageTrimMiddleware`, `ContextCompressionMiddleware`, `MicrocompactMiddleware`, `PromptCacheGuardMiddleware` — note these structs are *defined* in `middleware/types.rs`, not here; this file only holds their behavior. See `middleware/README.md`. |
 | `context/overflow.rs`, `context/summary.rs` | Child modules of `context.rs`: overflow-recovery attempts (compact, route, truncate) and how a compaction batch becomes a summary (split-turn prefix, file lists). Behaviour documented in `docs/modules/harness/compaction.md`. |
 | `observe.rs` | Constructors and `Middleware` impls for `StructuredOutputValidatorMiddleware`, `DynamicPromptMiddleware`, `RedactionMiddleware`, `TracingMiddleware`, and (also structs defined in `middleware/types.rs`) `LoggingMiddleware`/`UsageAccountingMiddleware`. |
-| `test.rs` | Unit tests for every middleware in this directory (construction, hook behavior, event emission, edge cases like poisoned mutexes and concurrent budget reservations). |
+| `mod_tests.rs` | Unit tests for every middleware in this directory (construction, hook behavior, event emission, edge cases like poisoned mutexes and concurrent budget reservations). |
 
 ## Operational constraints
 

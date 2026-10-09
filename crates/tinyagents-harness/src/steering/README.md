@@ -95,7 +95,7 @@ receives the transcript, it is **opt-in**: `SteeringPolicy::allow_all()` and
 | --- | --- |
 | `types.rs` | Every public type: `SteeringCommand`, `SteeringCommandKind`, `SteeringPolicy`, `PauseState`, `SteeringOutcome`, `SteeringHandle` (and its private `SteeringInner`). |
 | `mod.rs` | Behavioral code: `SteeringPolicy`/`SteeringHandle` methods and the `apply_pending_steering` checkpoint function. |
-| `test.rs` | Unit tests against `apply_pending_steering` directly, plus integration-style tests driving a full `AgentHarness` run with a `SteeringHandle` attached and asserting both transcript outcome and `AgentEvent::Steered` events. |
+| `mod_tests.rs` | Unit tests against `apply_pending_steering` directly, plus integration-style tests driving a full `AgentHarness` run with a `SteeringHandle` attached and asserting both transcript outcome and `AgentEvent::Steered` events. |
 
 ## Key invariants
 

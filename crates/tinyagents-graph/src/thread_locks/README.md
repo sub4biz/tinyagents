@@ -43,7 +43,7 @@ store); the map itself never keeps a mutex alive past the last caller.
 | File | Role |
 | --- | --- |
 | `mod.rs` | `ThreadLockMap` and its private `Inner` bookkeeping (weak-value map + sweep threshold). |
-| `test.rs` | Unit tests: identity of the mutex handed out while held, reclamation of dropped locks, and mutual exclusion under concurrent access. |
+| `mod_tests.rs` | Unit tests: identity of the mutex handed out while held, reclamation of dropped locks, and mutual exclusion under concurrent access. |
 
 ## Invariants and operational constraints
 

@@ -60,7 +60,7 @@ taxonomy and `Retry-After` parsing are consumed directly from
 | `failover.rs` | `FailoverReason` classification (the types themselves live in `types.rs`) (reusing `classify_provider_failure` and the provider-body matchers), the pure `decide` table, `FailoverState`. |
 | `failover_tests.rs` | Classification and decision-table tests. |
 | `jitter.rs` | A minimal, dependency-free `xorshift64*` RNG used only for backoff jitter spread — never security-relevant, and always bypassable in tests via an explicit `rand01`. |
-| `test.rs` | Backoff growth/capping, jitter scaling/clamping, `should_retry` boundaries, `is_retryable` classification, `FallbackPolicy` traversal, and token-bucket behavior. |
+| `mod_tests.rs` | Backoff growth/capping, jitter scaling/clamping, `should_retry` boundaries, `is_retryable` classification, `FallbackPolicy` traversal, and token-bucket behavior. |
 
 ## Reason-aware failover
 

@@ -65,7 +65,7 @@ recursively-generated sub-workflow compiles through, one level down.
 | --- | --- |
 | `types.rs` | `GraphBuilder` struct, `NodeContext`, `ForkId`, `Route`, `GraphDefaults`, `NodeHandler`/`NodeFuture`/`RouterFn` aliases, `START`/`END`, and the crate-private `NodeMeta`/`BuilderNode`/`Branch`. |
 | `mod.rs` | All `GraphBuilder` methods (construction, topology, configuration, `compile`) and `BarrierRelief`. |
-| `test.rs` | Unit tests for the compile contract: reducer requirement, START/END validation, missing-node/route detection, command-routing conflicts. |
+| `mod_tests.rs` | Unit tests for the compile contract: reducer requirement, START/END validation, missing-node/route detection, command-routing conflicts. |
 
 ## How it fits together
 

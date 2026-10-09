@@ -31,7 +31,7 @@ seam and nothing more.
 | --- | --- |
 | `mod.rs` | `compose_retrieval_context`, the sole free function tying the trait to prompt composition. |
 | `types.rs` | `RetrievalRequest`, `RetrievedDocument`, and the `Retriever` trait. |
-| `test.rs` | A recording fake `Retriever` exercising cancellation, ordering, and metadata round-tripping. |
+| `mod_tests.rs` | A recording fake `Retriever` exercising cancellation, ordering, and metadata round-tripping. |
 
 ## Operational constraints
 
