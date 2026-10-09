@@ -13,6 +13,7 @@ store lives, progress projection and policy.
 | --- | --- |
 | `types.rs` | Every data definition: `DetachedSubagentStatus`, `FinishedOutcome`, `WaitError`, `WaitOutcome`, `SpawnedSubagent`, `SubagentIdentity`, `SubagentSnapshot`, `SubagentResumeRef` |
 | `status.rs` | Status behavior (labels, terminal check) and `wait_detached` |
+| `completion.rs` | `DetachedCompletionTarget`, `record_detached_completion`, `spawn_status_watcher_with_completions`: record a detached child's final status with the completion router |
 | `ledger.rs` | Mirroring a status into a `TaskStore` and reading a durable record back |
 | `roster.rs` | Roster snapshots, session-id resolution and resume references |
 | `test.rs` | Unit tests |
@@ -25,6 +26,11 @@ store lives, progress projection and policy.
   failed result instead of hanging; a timeout leaves the entry intact.
 - Ledger helpers: `record_spawned`, `record_status`, `record_cancelled`,
   `spawn_status_watcher`, `record_to_wait_outcome`, `subagent_record_for_task`.
+- Completion helpers: `spawn_status_watcher_with_completions` is
+  `spawn_status_watcher` plus a durable push to the parent through a
+  `tinyagents_tasks::CompletionRouter` (a paused `awaiting_user` child records
+  nothing; a dropped sender records a failure). `SubagentDriver` does the same
+  for children it runs itself, via `with_completion_router`.
 - Roster helpers: `snapshot_for_owner`, `task_id_for_session`,
   `task_id_for_session_in_records`, `resume_ref_for_task`,
   `resume_ref_from_record`.
