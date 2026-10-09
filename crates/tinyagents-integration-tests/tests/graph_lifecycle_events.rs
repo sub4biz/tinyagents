@@ -275,3 +275,105 @@ async fn iter_stepping_announces_appends_once_and_never_the_input() {
         "{events:?}"
     );
 }
+
+/// Requests an approval interrupt on the first `after_model` hook only.
+struct PauseOnce(std::sync::atomic::AtomicBool);
+
+#[async_trait]
+impl tinyagents_harness::middleware::Middleware<(), ()> for PauseOnce {
+    fn name(&self) -> &str {
+        "pause_once"
+    }
+
+    async fn after_model(
+        &self,
+        ctx: &mut RunContext<()>,
+        _state: &(),
+        _response: &mut ModelResponse,
+    ) -> tinyagents_harness::Result<()> {
+        if self.0.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            ctx.request_control(tinyagents_harness::context::MiddlewareControl::Interrupt {
+                node: "review".into(),
+                message: "needs approval".into(),
+            });
+        }
+        Ok(())
+    }
+}
+
+/// An interrupted node discards its state and re-runs on resume, in a fresh
+/// runtime (a restart). Lifecycle events must stay consistent: the input is
+/// never announced and a message index is never announced twice without a
+/// retraction in between.
+#[tokio::test]
+async fn a_checkpoint_resume_in_a_fresh_runtime_neither_reannounces_input_nor_duplicates() {
+    use tinyagents_graph::InMemoryCheckpointer;
+    use tinyagents_graph::agent_loop::{LoopRuntime, LoopState, compile_loop};
+
+    let build = || {
+        let mut harness: AgentHarness<()> = AgentHarness::new();
+        harness
+            .register_model(
+                "mock",
+                Arc::new(MockModel::with_responses(vec![
+                    tool_call_response("c1", "lookup"),
+                    ModelResponse::assistant("done"),
+                ])),
+            )
+            .set_default_model("mock")
+            .register_tool(Arc::new(FakeTool::returning("lookup", "out")))
+            .push_middleware(Arc::new(PauseOnce(std::sync::atomic::AtomicBool::new(
+                true,
+            ))));
+        Arc::new(harness)
+    };
+    let checkpointer = Arc::new(InMemoryCheckpointer::<LoopState>::default());
+    let recorder = EventRecorder::new();
+    let graph_for = |harness: Arc<AgentHarness<()>>| {
+        let ctx = RunContext::new(RunConfig::new("resume-lifecycle"), ())
+            .with_events(recorder.sink());
+        let rt = Arc::new(LoopRuntime::for_run(harness, Arc::new(()), ctx));
+        compile_loop(rt)
+            .expect("compiles")
+            .with_checkpointer(checkpointer.clone())
+    };
+
+    let first = graph_for(build())
+        .run_with_thread("t", LoopState::seed(vec![Message::user("go")]))
+        .await
+        .expect("first leg reaches the interrupt");
+    assert_eq!(first.interrupts.len(), 1);
+
+    // A different harness and runtime resumes from the checkpoint. The pause
+    // already fired, so the second leg runs to the end.
+    // (`build` arms a fresh PauseOnce; disarm it by consuming the one shot.)
+    let second = build();
+    let resumed = graph_for(second)
+        .resume(
+            "t",
+            tinyagents_graph::Command {
+                update: None,
+                goto: Vec::new(),
+                resume: Some(json!({ "approved": true })),
+                resume_by_task: Default::default(),
+            },
+        )
+        .await
+        .expect("resume completes");
+    assert!(resumed.state.finished);
+
+    let events = lifecycle(&recorder.events());
+    assert!(!events.iter().any(|e| e.starts_with("append:0:")), "{events:?}");
+    let mut live = std::collections::BTreeSet::new();
+    for event in recorder.events() {
+        match event {
+            AgentEvent::MessageAppended { index, .. } => {
+                assert!(live.insert(index), "index {index} announced twice: {events:?}");
+            }
+            AgentEvent::MessageRetracted { index } => {
+                live.remove(&index);
+            }
+            _ => {}
+        }
+    }
+}
