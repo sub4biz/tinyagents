@@ -53,7 +53,7 @@ KV-cache/prompt-cache keeps hitting.
 | `types.rs` | Every public type: `TemplateRole`, `PromptTemplate`, `MessagesTemplate`, `PromptBuilder` (and its private `BuiltSegment`), `PromptSection`, `PromptTruncation`, `PromptAssembly`, `PromptBudget`. |
 | `model_guidance.rs` | Model-family matching and the optional execution-discipline prompt block. |
 | `mod.rs` | Behavioral code: the `{name}` template renderer, `PromptBuilder` methods (segment pushes, `build`, `fingerprint`), and the section-assembly free functions. |
-| `test.rs` | Unit tests for placeholder substitution/escaping, error cases, per-role rendering, `MessagesTemplate` ordering, and `PromptBuilder` segment cacheability/fingerprinting. |
+| `mod_tests.rs` | Unit tests for placeholder substitution/escaping, error cases, per-role rendering, `MessagesTemplate` ordering, and `PromptBuilder` segment cacheability/fingerprinting. |
 
 ## Key invariants
 

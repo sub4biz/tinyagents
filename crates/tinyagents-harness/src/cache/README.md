@@ -93,7 +93,7 @@ cheap and deterministic:
 | `memory.rs`      | `InMemoryResponseCache` LRU implementation.                         |
 | `singleflight.rs`| `SingleFlight` stampede protection.                                  |
 | `sqlite.rs`      | `SqliteResponseCache` (feature `sqlite`).                            |
-| `test.rs`        | Unit tests (see its module doc for coverage).                        |
+| `mod_tests.rs`   | Unit tests (see its module doc for coverage).                        |
 
 ## Operational constraints
 

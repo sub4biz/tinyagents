@@ -29,7 +29,7 @@ aggregation logic at every recursion boundary.
 | ---------- | --------------------------------------------------------------- |
 | `types.rs` | `ModelPricing`, `CostTotals`.                                   |
 | `mod.rs`   | `CostTotals` arithmetic impls, `estimate_cost`.                  |
-| `test.rs`  | Unit tests: per-token-class pricing, missing-price handling, accumulation. |
+| `mod_tests.rs` | Unit tests: per-token-class pricing, missing-price handling, accumulation. |
 
 ## Operational constraints
 
