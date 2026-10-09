@@ -49,7 +49,7 @@ fn a_permissive_definition_layer_is_ignored() {
         &ToolRulePolicy::default(),
         Some(&ToolRules::allow_all()),
     );
-    assert!(empty.rules.is_none());
+    assert!(empty.lists("anything", None, Surface::Catalog));
 }
 
 #[test]
