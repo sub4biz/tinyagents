@@ -4,24 +4,19 @@
 
 use super::*;
 
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use async_trait::async_trait;
-use serde_json::{Value, json};
+use serde_json::json;
 
-use crate::context::{RunConfig, RunContext};
 use crate::host::{
     AllowAllSecurityGate, FixedModelResolver, HostCapabilities, StaticContextComposer,
 };
-use crate::runtime::{
-    AgentHarness, AgentInvocation, AgentTurnRequest, RunPolicy, UnknownToolPolicy,
-};
+use crate::runtime::{AgentInvocation, AgentTurnRequest, RunPolicy};
 use crate::testkit::ScriptedModel;
 use crate::tool::ToolRulePolicy;
 use tinyagents_definition::{AgentDefinition, InMemoryDefinitionRegistry};
-use tinyinference_llm::message::Message;
 use tinyinference_llm::model::ModelResponse;
-use tinyinference_llm::tool::ToolCall;
 use tinytools::{
     RuleContext, Tool, ToolExposure, ToolPolicy, ToolResult, ToolRuleSet, ToolRules, ToolSubject,
 };
