@@ -140,6 +140,21 @@ in with `SubAgentTool::with_spawn_admission` /
 `#[non_exhaustive]`: downstream code that matches it exhaustively must add a
 wildcard arm. There is no CHANGELOG in this repository.
 
+## Completion push (D10)
+
+`SubagentDriver::with_completion_router(Arc<CompletionRouter>)` makes the driver
+record each child it finishes with a `tinyagents_tasks::CompletionRouter`, so the
+parent is told according to the child's `NotifyMode`
+(`PreparedSubagent::with_notify_mode`, default `Followup`). The parent key is
+`PreparedSubagent::with_completion_parent`, else the request's thread id, else
+the parent run id. Only the invocation that wins the durable terminal write
+records, so coalesced followers and replayed terminals add nothing. Recorded:
+`Completed` (success), `Incomplete`, and an executor error after launch
+(failed). Not recorded: a cancellation (the parent's own doing) and a pause (the
+same task id completes later). A router failure is logged, never raised. With no
+router configured the driver is unchanged. Detached children tracked by a status
+channel use `spawn_status_watcher_with_completions` (see `detached/README.md`).
+
 ## Policy, result and role (D5/D6/D9)
 
 One `SubAgentPolicy { timeout, retry, budget, retry_after_tool_calls }` governs

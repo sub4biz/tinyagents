@@ -9,9 +9,7 @@ use tinyagents_harness::CancellationToken;
 use tinyagents_harness::context::{RunConfig, RunContext};
 use tinyagents_harness::run_queue::{QueueLane, RunQueue, RunQueueHandle};
 use tinyagents_runtime::ToolSnapshot;
-use tinyagents_tasks::{
-    CompletionRouter, CompletionStatus, InMemoryCompletionStore, NotifyMode,
-};
+use tinyagents_tasks::{CompletionRouter, CompletionStatus, InMemoryCompletionStore, NotifyMode};
 use tinyinference_llm::message::Message;
 
 use super::*;
