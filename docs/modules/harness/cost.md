@@ -74,7 +74,7 @@ once every capped tier is exceeded), and uses that tier's rates — falling
 back to the flat `ModelPricing` fields for any rate the matched tier leaves
 `None`. A `ModelPricing` with an empty `tiers` list behaves exactly as
 before. `tiers` is `serde(default)`, so existing serialized pricing tables
-deserialize unchanged. See `crates/tinyagents-harness/src/cost/test.rs` for
+deserialize unchanged. See `crates/tinyagents-harness/src/cost/mod_tests.rs` for
 the tier-selection and fallback tests, and
 `crates/tinyagents-registry/src/bin/catalog_gen.rs` for how the generator
 maps `models.dev`'s `cost.tiers` shape into `PriceTier`s.

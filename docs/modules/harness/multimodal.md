@@ -52,9 +52,9 @@ lowest-common-denominator:
   placeholder text block noting the omitted attachment
   (`[audio attachment omitted: <descriptor>]`) instead of being dropped.
 
-See `vendor/tinyinference/crates/tinyinference-llm/src/providers/openai/test.rs`
-and `.../providers/anthropic/test.rs` for the serialization fixtures, and
-`.../message/test.rs` for `MediaRef`/`ContentBlock` round-trip and
+See `vendor/tinyinference/crates/tinyinference-llm/src/providers/openai/mod_tests.rs`
+and `.../providers/anthropic/mod_tests.rs` for the serialization fixtures, and
+`.../message/mod_tests.rs` for `MediaRef`/`ContentBlock` round-trip and
 accessor tests.
 
 ## Harness-side accounting

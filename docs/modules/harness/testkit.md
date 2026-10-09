@@ -85,7 +85,7 @@ This is deliberately schema-driven rather than hand-scripted: adding a tool
 to a harness under test does not require updating a script, and every tool's
 argument-schema validation path is genuinely exercised (not just the tools a
 test author remembered to script). See
-`crates/tinyagents-harness/src/testkit/test.rs` for the coverage.
+`crates/tinyagents-harness/src/testkit/mod_tests.rs` for the coverage.
 
 ## Trajectory Assertions
 

@@ -86,7 +86,7 @@ and wiring a stop into a turn stays the host's call.
 
 ## Testing
 
-Unit tests in `crates/tinyagents-graph/src/goals/test.rs` (types, store, tools, the gate loop, and
+Unit tests in `crates/tinyagents-graph/src/goals/mod_tests.rs` (types, store, tools, the gate loop, and
 budget enforcement on `InMemoryStore`); an end-to-end self-driving loop in
 `tests/e2e_graph_goals.rs`; feature coverage for budget accounting and the
 mid-turn guard in `tests/feature_graph_goal_budget.rs`.
