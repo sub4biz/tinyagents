@@ -13,7 +13,7 @@ use super::engine::{
     WorkflowExecutor, render_compat_output,
 };
 use crate::subagent::{
-    AgentStepConfig, AgentStepIdentity, IncompleteKind, StepSuccess, SubagentOutcome,
+    AgentStepConfig, AgentStepIdentity, IncompleteKind, ResultPolicy, StepSuccess, SubagentOutcome,
     SubagentOutcomeKind, run_agent_step,
 };
 
@@ -53,7 +53,14 @@ pub(super) async fn run_child_step<E: WorkflowExecutor + 'static>(
         request.agent_id
     );
     let work_request = request.clone();
-    let schema_checked = config.result_policy.schema.is_some();
+    // The driver validates a schema against the output *text* only, which
+    // mis-reads a JSON string. Validate the structured value here instead and
+    // keep the schema out of the driver's policy so truncation and artifact
+    // storage keep seeing the display text.
+    let schema = config.result_policy.schema.clone();
+    let mut step_config = config.clone();
+    step_config.result_policy.schema = None;
+    let config = &step_config;
     let registration = Arc::new(RecordingRegistration {
         inner: registration,
         ids: parking_lot::Mutex::new(Vec::new()),
@@ -71,7 +78,7 @@ pub(super) async fn run_child_step<E: WorkflowExecutor + 'static>(
                 .execute(request, ctx.cancellation, registration)
                 .await
                 .map_err(|error| anyhow::anyhow!(error.0))?;
-            let rendered = step_text(&result.output, schema_checked);
+            let rendered = render_compat_output(&result.output);
             Ok(StepSuccess::new(rendered, result))
         }
     })
@@ -82,12 +89,28 @@ pub(super) async fn run_child_step<E: WorkflowExecutor + 'static>(
                 let mut child = step.value.ok_or_else(|| {
                     OrchestrationError("workflow child completed without a result".to_owned())
                 })?;
+                let original = child.output.clone();
                 // Keep the executor's structured output unless the result
                 // policy actually changed the text.
-                if step.outcome.output != step_text(&child.output, schema_checked) {
+                if step.outcome.output != render_compat_output(&child.output) {
                     child.output = Value::String(step.outcome.output.clone());
                 }
-                Ok((child, result_policy_annotations(&step.outcome)))
+                let schema_error = match &schema {
+                    Some(schema) => {
+                        // Validate the executor's structured value, not the
+                        // possibly trimmed display text.
+                        ResultPolicy::new()
+                            .with_schema(schema.clone())
+                            .apply(&step.outcome.task_id, &step.outcome.output, Some(&original))
+                            .await
+                            .schema_error
+                    }
+                    None => None,
+                };
+                Ok((
+                    child,
+                    result_policy_annotations(&step.outcome, schema_error),
+                ))
             }
             SubagentOutcomeKind::Incomplete(incomplete) => {
                 tracing::debug!(
@@ -128,29 +151,18 @@ pub(super) async fn run_child_step<E: WorkflowExecutor + 'static>(
     }
 }
 
-/// The text the result policy sees. With a schema configured it is the JSON
-/// serialization, so a string output validates as a JSON string (not as
-/// invalid bare text); otherwise the display form the engine already uses.
-fn step_text(output: &Value, schema_checked: bool) -> String {
-    if schema_checked {
-        serde_json::to_string(output).unwrap_or_else(|_| render_compat_output(output))
-    } else {
-        render_compat_output(output)
-    }
-}
-
 /// Result-policy findings (schema check, artifact overflow) the driver
 /// recorded on the outcome, for the phase output metadata. `None` when the
 /// policy had nothing to report.
-fn result_policy_annotations(outcome: &SubagentOutcome) -> Option<Value> {
-    if outcome.schema_error.is_none()
-        && outcome.artifact_error.is_none()
-        && outcome.artifacts.is_empty()
-    {
+fn result_policy_annotations(
+    outcome: &SubagentOutcome,
+    schema_error: Option<String>,
+) -> Option<Value> {
+    if schema_error.is_none() && outcome.artifact_error.is_none() && outcome.artifacts.is_empty() {
         return None;
     }
     Some(serde_json::json!({
-        "schemaError": outcome.schema_error,
+        "schemaError": schema_error,
         "artifactError": outcome.artifact_error,
         "artifacts": outcome.artifacts,
     }))

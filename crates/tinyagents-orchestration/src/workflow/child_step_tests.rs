@@ -153,3 +153,18 @@ async fn string_output_validates_against_a_string_schema() {
     assert!(out["metadata"].get("resultPolicy").is_none(), "{out}");
     assert_eq!(out["output"], json!("plan output"));
 }
+
+#[tokio::test]
+async fn schema_and_cap_together_keep_the_display_text_for_truncation() {
+    // "plan output" is 11 chars; a cap of 11 must leave it untouched even
+    // though its JSON form (13 chars) would not fit.
+    let (store, _executor, engine) = run_with(
+        AgentStepConfig::default().with_result_policy(
+            ResultPolicy::new()
+                .with_schema(json!({"type": "string"}))
+                .with_max_chars(11),
+        ),
+    );
+    let states = drive(&engine, &store).await;
+    assert_eq!(states["plan"]["outputs"][0]["output"], json!("plan output"));
+}
