@@ -19,6 +19,7 @@ mod planner;
 mod policy;
 mod result_policy;
 mod role;
+mod step;
 mod types;
 
 pub use admission::{SpawnAdmission, SpawnPolicy, SpawnRejection, SpawnReservation};
@@ -42,6 +43,10 @@ pub use invocation::{
     SubAgentSession, SubAgentTool, register_subagent_job_tools,
 };
 pub use persistence::SubagentPersistence;
+pub use step::{
+    AgentStepConfig, AgentStepError, AgentStepIdentity, AgentStepResult, StepSuccess,
+    StepWorkError, run_agent_step,
+};
 pub use planner::SubagentPlanner;
 pub use policy::{SubAgentBudget, SubAgentPolicy};
 pub use result_policy::{
