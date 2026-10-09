@@ -151,11 +151,26 @@ a foreground one whose result already returns to the parent, is never recorded.
 The parent key is `PreparedSubagent::with_completion_parent`, else the request's
 thread id, else the parent run id. Only the invocation that wins the durable
 terminal write records, so coalesced followers and replayed terminals add
-nothing. Recorded: `Completed` (success) and `Incomplete`. Not recorded: a
-cancellation (the parent's own doing), a pause (the same task id completes
-later), and an executor error (nothing terminal was persisted and the task may be
-re-run; `run` returns the error, and a host that wants a failed push records it
-itself). A router failure is logged, never raised. With no router configured the
+nothing. Recorded:
+
+- `Completed` as success and `Incomplete` as incomplete;
+- a cancellation as `Cancelled` with an empty result, including a cancel that
+  lands after the planner but before the child launches (a cancel before
+  planning has no notify mode yet and is not recorded);
+- an executor error (`Execution`, or `Transient` once retries are exhausted) as
+  `Failed` with the error text. `run` still returns the error. A host seam fault
+  (`TaskIdMismatch`, `Persistence`, `MissingCapability`) is not the child
+  failing and is not recorded.
+
+Not recorded: a pause (`AwaitingInput`). It is not terminal, so nothing is
+recorded until the resume that finishes the same task id, which records once
+(the durable terminal write is what is recorded). For the same reason an error
+while resuming a paused task is not recorded: its pause is still durable. The
+router keeps the first record per task id, so a task re-run under the same id
+after a recorded failure or cancellation does not add a second completion; use a
+fresh task id to run it again. Without a router, or without a notify mode, none
+of this applies and behaviour is unchanged. A router failure is logged, never
+raised. With no router configured the
 driver is unchanged. Detached children tracked by a status channel use
 `spawn_status_watcher_with_completions` (see `detached/README.md`), which keeps
 watching across a pause and skips a child whose ledger shows a cancellation.
