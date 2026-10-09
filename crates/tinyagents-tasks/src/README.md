@@ -150,7 +150,7 @@ hand-off and nothing product-specific:
   `mark_failed(ids)` (moves a record to `GaveUp` once `attempts >=
   max_attempts`, default `DEFAULT_MAX_ATTEMPTS` = 5, and returns those records
   for the host's give-up policy), `pending_for(parent)`, `cancel_parent` /
-  `resume_parent`, `attach_parent` / `detach_parent`, `compact`, and
+  `resume_parent` (the flag is a durable marker record, so it survives a restart), `attach_parent` / `detach_parent`, `compact`, and
   `restart_recovery_note(parent, children)`.
 - `NotifyMode`, set per spawn: `Followup` (default) pushes onto the parent's
   `QueueLane::Followup` when the parent is attached, `Collect` onto
@@ -165,6 +165,10 @@ hand-off and nothing product-specific:
 - `CompletionFormatter` — the wording. `NeutralCompletionFormatter` is the
   default (escaped JSON in a `<completed_child_tasks>` block); a host supplies
   its own with `CompletionRouter::with_formatter`.
+
+Task ids are the dedupe key and must be unique across parents: recording an id
+already held by another parent returns `RecordOutcome::IdCollision` and stores
+nothing.
 
 After a restart, `pending_for(parent)` returns what was never delivered and
 `restart_recovery_note` folds it into the recovery note beside the interrupted
