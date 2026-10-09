@@ -152,12 +152,13 @@ pub fn with_connection<T>(
     let outcome = native
         .run_blocking(|conn| {
             let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(conn)));
-            if outcome.is_err() && !conn.is_autocommit() {
-                if let Err(rollback) = conn.execute_batch("ROLLBACK") {
-                    tracing::warn!(
-                        "[session] rollback after a panicking session call failed: {rollback}"
-                    );
-                }
+            if outcome.is_err()
+                && !conn.is_autocommit()
+                && let Err(rollback) = conn.execute_batch("ROLLBACK")
+            {
+                tracing::warn!(
+                    "[session] rollback after a panicking session call failed: {rollback}"
+                );
             }
             outcome
         })

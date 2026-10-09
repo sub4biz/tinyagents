@@ -96,7 +96,7 @@ fn an_unopenable_path_is_a_storage_error() {
 fn a_panicking_call_leaves_the_connection_usable() {
     let workspace = tempfile::tempdir().unwrap();
     let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        with_transaction(workspace.path(), |conn| {
+        with_transaction(workspace.path(), |conn| -> Result<()> {
             conn.execute_batch("CREATE TABLE half (n INTEGER)")
                 .storage_context("half")?;
             panic!("session bug mid-transaction");
