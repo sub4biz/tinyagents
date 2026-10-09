@@ -113,3 +113,7 @@ pub fn project_injected_arguments(mut schema: ToolSchema, injected: &[&str]) -> 
     );
     schema
 }
+
+#[cfg(test)]
+#[path = "injected_tests.rs"]
+mod tests;
