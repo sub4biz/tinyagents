@@ -50,6 +50,10 @@ pub(super) const INDEX: &str = "session_transcripts";
 /// One document per write to a transcript: its append-only log.
 pub(super) const ENTRIES: &str = "session_transcript_entries";
 
+/// Index refresh attempts after a durable write before leaving the repair
+/// to the next write or read.
+const INDEX_ATTEMPTS: usize = 3;
+
 /// Insert attempts before a contended write gives up.
 const CAS_ATTEMPTS: usize = 64;
 
@@ -165,6 +169,10 @@ struct Replay {
     sealed: bool,
     /// The lookup fields last written to [`INDEX`] by this handle.
     indexed: Option<Value>,
+    /// The version of the generation reservation this handle was opened
+    /// with, until its first write claims it (see
+    /// [`HistoryInner::claim_reservation`]).
+    reservation: Option<Version>,
 }
 
 impl Replay {
@@ -388,6 +396,7 @@ impl HistoryInner {
             let Some(entry) = build(&replay, &self.seed)? else {
                 return Ok(false);
             };
+            self.claim_reservation(&mut replay).await?;
             let seq = replay.next_seq;
             let mut doc = serde_json::to_value(&entry).map_err(|error| serialization(&error))?;
             if let Value::Object(fields) = &mut doc {
@@ -407,15 +416,26 @@ impl HistoryInner {
                 Ok(_) => {
                     replay.apply(seq, entry);
                     // The entry is durable: report the write as done. A
-                    // failed index refresh only delays lookups by thread or
-                    // agent until this handle's next write retries it.
-                    if let Err(error) = self.index(&mut replay).await {
+                    // failed index refresh is retried a few times here, then
+                    // by this handle's next write and by any read of the
+                    // transcript; it never makes the durable write fail.
+                    let mut last = None;
+                    for _ in 0..INDEX_ATTEMPTS {
+                        match self.index(&mut replay).await {
+                            Ok(()) => {
+                                last = None;
+                                break;
+                            }
+                            Err(error) => last = Some(error),
+                        }
+                    }
+                    if let Some(error) = last {
                         tracing::warn!(
                             target: "tinyagents_session::port::drivers",
                             stem = %self.stem,
                             seq,
                             %error,
-                            "[session-store] transcript index refresh failed; retried on the next write"
+                            "[session-store] transcript index refresh failed; retried on the next write or read"
                         );
                     }
                     return Ok(true);
@@ -428,6 +448,63 @@ impl HistoryInner {
             "transcript {} kept changing under {CAS_ATTEMPTS} write attempts",
             self.stem
         )
+    }
+
+    /// Claims the generation reservation this handle was opened with, once,
+    /// before its first write: a compare-and-swap from the reserved version.
+    /// If another process took the reservation over in the meantime (this
+    /// one stalled past [`STALE_RESERVATION_MS`]), the generation is theirs
+    /// and this handle's writes are refused instead of overwriting it.
+    async fn claim_reservation(&self, replay: &mut Replay) -> anyhow::Result<()> {
+        let Some(reserved) = replay.reservation else {
+            return Ok(());
+        };
+        let claim = json!({
+            "stem": self.stem,
+            "subagent": is_subagent(&self.stem),
+            "written": false,
+            "created_at": now_rfc3339(),
+            "reserved_at": chrono::Utc::now().timestamp_millis(),
+        });
+        match self
+            .docs
+            .put(
+                INDEX,
+                &doc_key(&[&self.stem]),
+                claim,
+                Precondition::Version(reserved),
+            )
+            .await
+        {
+            Ok(_) => {
+                replay.reservation = None;
+                Ok(())
+            }
+            Err(error) if error.kind() == ErrorKind::Conflict => anyhow::bail!(
+                "session generation {} was taken over by another writer; reload the session",
+                self.stem
+            ),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    /// Releases the reservation of a generation this handle never wrote.
+    async fn release_reservation(&self, replay: &mut Replay) -> Result<(), StorageError> {
+        let Some(reserved) = replay.reservation.take() else {
+            return Ok(());
+        };
+        match self
+            .docs
+            .delete(
+                INDEX,
+                &doc_key(&[&self.stem]),
+                Precondition::Version(reserved),
+            )
+            .await
+        {
+            Err(error) if error.kind() != ErrorKind::Conflict => Err(error),
+            _ => Ok(()),
+        }
     }
 
     /// Brings the index up to this replay on a read, best effort. A write
@@ -659,6 +736,22 @@ impl TranscriptHistory for DriverTranscriptHistory {
     }
 
     fn clear(&self) -> anyhow::Result<()> {
+        // Clearing a reserved generation nobody wrote gives the reservation
+        // back, so the compaction can be retried at once instead of after
+        // the stale timeout.
+        let inner = Arc::clone(&self.inner);
+        let released = run_on(&self.bridge, async move {
+            let mut replay = inner.replay.lock().await;
+            inner.refresh(&mut replay).await?;
+            if replay.written || replay.reservation.is_none() {
+                return Ok(false);
+            }
+            inner.release_reservation(&mut replay).await?;
+            Ok(true)
+        })?;
+        if released {
+            return Ok(());
+        }
         self.commit(|replay, _| {
             anyhow::ensure!(!replay.sealed, "transcript generation is sealed");
             Ok(replay.written.then(|| Entry {
@@ -708,13 +801,27 @@ impl DriverTranscriptLocator {
     }
 
     fn handle(&self, stem: &str, seed: TranscriptMeta) -> DriverTranscriptHistory {
+        self.reserved_handle(stem, seed, None)
+    }
+
+    /// A handle that holds the generation reservation `reservation`; its
+    /// first write claims it (or is refused if it was taken over).
+    fn reserved_handle(
+        &self,
+        stem: &str,
+        seed: TranscriptMeta,
+        reservation: Option<Version>,
+    ) -> DriverTranscriptHistory {
         DriverTranscriptHistory {
             inner: Arc::new(HistoryInner {
                 docs: Arc::clone(&self.docs),
                 declared: Arc::clone(&self.declared),
                 stem: stem.to_string(),
                 seed,
-                replay: Mutex::new(Replay::default()),
+                replay: Mutex::new(Replay {
+                    reservation,
+                    ..Replay::default()
+                }),
             }),
             bridge: self.bridge.clone(),
             path: PathBuf::from(format!("{}/{stem}", self.label)),
@@ -995,7 +1102,7 @@ impl DriverTranscriptLocator {
         let mut meta = seed;
         meta.session_id = Some(successor.session_id());
         meta.parent_session_id = successor.parent_session_id();
-        let handle = self.handle(&stem, meta);
+        let handle = self.reserved_handle(&stem, meta, Some(reservation));
         Ok((successor, Arc::new(handle)))
     }
 

@@ -614,3 +614,56 @@ fn a_read_repairs_an_index_a_write_could_not_refresh() {
         "the read re-indexed it"
     );
 }
+
+#[test]
+fn clearing_an_unwritten_successor_frees_the_generation() {
+    let docs = docs();
+    let locator = locator(&docs);
+    let session = SessionRef::scoped("t", "planner");
+    locator
+        .open_session(&session, meta("t"))
+        .unwrap()
+        .append(message("user", "a"))
+        .unwrap();
+    let (_, next) = locator.begin_generation(&session, meta("t")).unwrap();
+    next.clear().unwrap();
+    let (successor, again) = locator
+        .begin_generation(&session, meta("t"))
+        .expect("the cleared reservation is free at once");
+    again.append(message("user", "summary")).unwrap();
+    assert_eq!(locator.head_generation(&session), successor);
+}
+
+#[test]
+fn a_taken_over_generation_refuses_its_stalled_owner() {
+    let docs = docs();
+    let locator = locator(&docs);
+    let session = SessionRef::scoped("t", "planner");
+    locator
+        .open_session(&session, meta("t"))
+        .unwrap()
+        .append(message("user", "a"))
+        .unwrap();
+    let (_, stalled) = locator.begin_generation(&session, meta("t")).unwrap();
+    // The owner stalls past the stale timeout and another process takes over.
+    let id = doc_key(&[&session_stem(&session.next_generation())]);
+    let aged = Arc::clone(&docs);
+    on_bridge(async move {
+        let found = aged.get(INDEX, &id).await?.unwrap();
+        let mut doc = found.doc;
+        doc["reserved_at"] = json!(0);
+        aged.put(INDEX, &id, doc, Precondition::None).await
+    });
+    let (_, winner) = locator.begin_generation(&session, meta("t")).unwrap();
+    winner.append(message("user", "winner")).unwrap();
+
+    let error = stalled.replace(&[message("user", "late")]).unwrap_err();
+    assert!(error.to_string().contains("taken over"), "{error}");
+    let contents: Vec<String> = winner
+        .messages()
+        .unwrap()
+        .into_iter()
+        .map(|row| row.content)
+        .collect();
+    assert_eq!(contents, ["winner"]);
+}
