@@ -143,7 +143,29 @@ pub fn with_connection<T>(
 ) -> Result<T> {
     let db_path = db_path(workspace_dir);
     let native = cached_connection(&db_path)?;
-    native.run_blocking(f).map_err(driver_error)?
+    // A panic in `f` must not unwind while the driver's connection lock is
+    // held: that would poison the one shared connection for every later
+    // call in the process. Catch it inside, roll back any transaction it
+    // left open, release the lock, and only then resume the panic, so the
+    // caller still sees it and the connection stays usable (as the earlier
+    // store's poison-tolerant lock allowed).
+    let outcome = native
+        .run_blocking(|conn| {
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(conn)));
+            if outcome.is_err() && !conn.is_autocommit() {
+                if let Err(rollback) = conn.execute_batch("ROLLBACK") {
+                    tracing::warn!(
+                        "[session] rollback after a panicking session call failed: {rollback}"
+                    );
+                }
+            }
+            outcome
+        })
+        .map_err(driver_error)?;
+    match outcome {
+        Ok(result) => result,
+        Err(panic) => std::panic::resume_unwind(panic),
+    }
 }
 
 /// Applies the per-connection pragmas every session-DB handle needs.

@@ -91,3 +91,28 @@ fn an_unopenable_path_is_a_storage_error() {
     assert!(matches!(error, TinyAgentsError::Storage(_)), "{error:?}");
     assert!(driver_error("x").to_string().contains("session DB"));
 }
+
+#[test]
+fn a_panicking_call_leaves_the_connection_usable() {
+    let workspace = tempfile::tempdir().unwrap();
+    let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        with_transaction(workspace.path(), |conn| {
+            conn.execute_batch("CREATE TABLE half (n INTEGER)")
+                .storage_context("half")?;
+            panic!("session bug mid-transaction");
+        })
+    }));
+    assert!(panicked.is_err(), "the panic still reaches the caller");
+    // The lock is not poisoned and the open transaction was rolled back.
+    let tables: i64 = with_connection(workspace.path(), |conn| {
+        conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE name = 'half'",
+            [],
+            |row| row.get(0),
+        )
+        .storage_context("probe")
+    })
+    .unwrap();
+    assert_eq!(tables, 0);
+    with_transaction(workspace.path(), |_| Ok(())).unwrap();
+}
