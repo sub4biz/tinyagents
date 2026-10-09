@@ -101,11 +101,12 @@ impl SubagentPersistence for Memory {
         outcome: &SubagentOutcome,
         _: Option<&SubagentResume>,
     ) -> Result<SubagentTerminalPersistenceDisposition, SubagentError> {
+        let mut terminals = self.terminals.lock().unwrap();
+        if terminals.contains_key(key) {
+            return Ok(SubagentTerminalPersistenceDisposition::Existing);
+        }
         self.pauses.lock().unwrap().remove(key);
-        self.terminals
-            .lock()
-            .unwrap()
-            .insert(key.clone(), outcome.clone());
+        terminals.insert(key.clone(), outcome.clone());
         Ok(SubagentTerminalPersistenceDisposition::Inserted)
     }
 }

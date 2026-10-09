@@ -480,9 +480,21 @@ async fn an_interrupt_after_the_tool_batch_retracts_instead_of_closing_the_turn(
         !events.iter().any(|e| e.starts_with("turn.completed:1:c1")),
         "a turn holding discarded tool results must not be reported complete: {events:?}"
     );
+    // Net of retractions, the discarded tool message (index 2) is not live.
+    let mut live = std::collections::BTreeSet::new();
+    for event in recorder.events() {
+        match event {
+            AgentEvent::MessageAppended { index, .. } => {
+                live.insert(index);
+            }
+            AgentEvent::MessageRetracted { index } => {
+                live.remove(&index);
+            }
+            _ => {}
+        }
+    }
     assert!(
-        !events.iter().any(|e| e.starts_with("append:2:tool"))
-            || recorder.kinds().contains(&"message.retracted".to_string()),
-        "{events:?}"
+        !live.contains(&2),
+        "discarded tool message left live: {events:?}"
     );
 }
