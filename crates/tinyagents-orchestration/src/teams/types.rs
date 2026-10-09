@@ -95,11 +95,11 @@ impl std::error::Error for TeamError {}
 
 /// The driver-side policy and identity of one member step.
 ///
-/// [`run_member_graph`] uses [`MemberStep::default`], which is inert (unlimited
+/// [`run_member_graph`](super::run_member_graph) uses [`MemberStep::default`], which is inert (unlimited
 /// admission, no timeout, one attempt, no result trimming), so the worker runs
 /// exactly as it did before the step went through
 /// [`SubagentDriver`](crate::subagent::SubagentDriver). Hosts that want the
-/// driver's limits call [`run_member_graph_with`].
+/// driver's limits call [`run_member_graph_with`](super::run_member_graph_with).
 #[derive(Clone)]
 pub struct MemberStep {
     /// Spawn admission, timeout/retry/budget, result policy and role.
