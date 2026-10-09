@@ -189,9 +189,25 @@ where
     .await;
     match result {
         Ok(result) => Ok(match result.outcome.status {
-            SubagentOutcomeKind::Completed => MemberOutcome::Completed {
-                output: result.outcome.output,
-            },
+            SubagentOutcomeKind::Completed => {
+                // `on_complete` carries only the text; findings are logged so a
+                // schema miss or failed artifact store is not silent.
+                if let Some(error) = &result.outcome.schema_error {
+                    tracing::warn!(
+                        "{LOG_PREFIX} schema_error member={} error={error}",
+                        step.identity.task_id
+                    );
+                }
+                if let Some(error) = &result.outcome.artifact_error {
+                    tracing::warn!(
+                        "{LOG_PREFIX} artifact_error member={} error={error}",
+                        step.identity.task_id
+                    );
+                }
+                MemberOutcome::Completed {
+                    output: result.outcome.output,
+                }
+            }
             SubagentOutcomeKind::Incomplete(incomplete) => MemberOutcome::Failed {
                 reason: incomplete.reason,
             },

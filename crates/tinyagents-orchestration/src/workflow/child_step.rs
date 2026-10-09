@@ -13,8 +13,8 @@ use super::engine::{
     WorkflowExecutor, render_compat_output,
 };
 use crate::subagent::{
-    AgentStepConfig, AgentStepIdentity, IncompleteKind, StepSuccess, SubagentOutcome, SubagentOutcomeKind,
-    run_agent_step,
+    AgentStepConfig, AgentStepIdentity, IncompleteKind, StepSuccess, SubagentOutcome,
+    SubagentOutcomeKind, run_agent_step,
 };
 
 /// Remembers the child ids one step registered so a timed-out child can be

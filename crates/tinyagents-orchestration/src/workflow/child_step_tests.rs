@@ -11,7 +11,7 @@ use tinyagents_session::run_ledger::WorkflowRunStatus;
 
 use crate::subagent::{ResultPolicy, SpawnAdmission, SpawnPolicy};
 use crate::workflow::tests::{FakeExecutor, MemoryStore, definition};
-use crate::workflow::WorkflowEngine;
+use crate::workflow::{WorkflowEngine, WorkflowStore};
 
 fn run_with(
     config: AgentStepConfig,
@@ -97,8 +97,8 @@ async fn default_step_config_leaves_the_output_untouched() {
 async fn timed_out_child_is_cancelled_by_its_registered_id() {
     use std::time::Duration;
 
-    use crate::workflow::tests::BlockingExecutor;
     use crate::subagent::SubAgentPolicy;
+    use crate::workflow::tests::BlockingExecutor;
 
     let store = Arc::new(MemoryStore::default());
     let executor = Arc::new(BlockingExecutor::default());
@@ -130,4 +130,14 @@ async fn timed_out_child_is_cancelled_by_its_registered_id() {
         "the timed-out child was cancelled: {:?}",
         executor.cancelled.lock()
     );
+}
+
+#[tokio::test]
+async fn schema_failure_is_recorded_in_phase_metadata() {
+    let (store, _executor, engine) = run_with(AgentStepConfig::default().with_result_policy(
+        ResultPolicy::new().with_schema(json!({"type": "object", "required": ["x"]})),
+    ));
+    let states = drive(&engine, &store).await;
+    let meta = &states["plan"]["outputs"][0]["metadata"];
+    assert!(meta["resultPolicy"]["schemaError"].is_string(), "{meta}");
 }
