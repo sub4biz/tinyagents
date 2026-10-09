@@ -203,7 +203,7 @@ The other pairs convert directly where both sides have a meaningful value:
 <-> `CompletionStatus` (`From` in, `TryFrom` out; `Queued`, `Running` -> error),
 and `DetachedSubagentStatus` / `SubagentOutcomeKind` -> `AgentRunStatus`,
 `SubAgentJobStatus` and `CompletionStatus` (`AwaitingUser` / `AwaitingInput`
-pause states -> error where there is no pause state).
+pause states and `Running` -> error where there is no equivalent). Two caveats: the canonical status has no `Incomplete`, so the direct job/outcome <-> `CompletionStatus` pairs keep the incomplete-vs-failed distinction that a trip through `OrchestrationTaskStatus` loses; and `detached/ledger.rs` (`record_to_wait_outcome`) folds a stored task status back into `DetachedSubagentStatus`, mapping `TimedOut`, `Abandoned` and `Cancelled` to `Failed`.
 
 Terminality is preserved by every mapping, except that
 `DetachedSubagentStatus::is_terminal` treats `AwaitingUser` as terminal (the

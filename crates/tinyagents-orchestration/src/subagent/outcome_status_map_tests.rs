@@ -37,6 +37,7 @@ fn outcome_to_run_follows_the_task_mapping() {
         (SubagentOutcomeKind::Completed, Run::Completed),
         (paused(), Run::AwaitingUser),
         (incomplete(IncompleteKind::Timeout), Run::Failed),
+        (incomplete(IncompleteKind::BudgetExceeded), Run::Failed),
         (incomplete(IncompleteKind::Unspecified), Run::Failed),
         (SubagentOutcomeKind::Cancelled, Run::Cancelled),
     ];
@@ -71,6 +72,14 @@ fn outcome_to_completion_covers_every_variant() {
         (SubagentOutcomeKind::Completed, Some(Done::Success)),
         (paused(), None),
         (incomplete(IncompleteKind::Timeout), Some(Done::Incomplete)),
+        (
+            incomplete(IncompleteKind::BudgetExceeded),
+            Some(Done::Incomplete),
+        ),
+        (
+            incomplete(IncompleteKind::Unspecified),
+            Some(Done::Incomplete),
+        ),
         (SubagentOutcomeKind::Cancelled, Some(Done::Cancelled)),
     ];
     for (outcome, done) in expected {

@@ -423,7 +423,7 @@ pub enum IncompleteKind {
 /// Not to be confused with the session crate's `TranscriptSubagentStatus` (a
 /// display projection read back from a transcript) or with the job / detached
 /// / task / run-ledger vocabularies; see the status-vocabulary map in the
-/// crate README. Formerly named `SubagentStatus`; the serde wire format is
+/// `tinyagents-tasks` README. Formerly named `SubagentStatus`; the serde wire format is
 /// unchanged.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum SubagentOutcomeKind {

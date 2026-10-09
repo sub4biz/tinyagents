@@ -1,6 +1,6 @@
 //! Conversions from [`DetachedSubagentStatus`] to the other status
 //! vocabularies. The payloads (output, question, error) are dropped; only the
-//! lifecycle state maps. See the crate README for the full map.
+//! lifecycle state maps. See the `tinyagents-tasks` README for the full map.
 
 use tinyagents_session::run_ledger::AgentRunStatus;
 use tinyagents_tasks::{CompletionStatus, NoEquivalentStatus, OrchestrationTaskStatus};

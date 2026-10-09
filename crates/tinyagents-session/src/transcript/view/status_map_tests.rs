@@ -59,7 +59,7 @@ fn task_to_transcript_covers_every_task_status() {
         (Task::Abandoned, Some(S::Interrupted)),
         (Task::Cancelled, None),
     ];
-    assert_eq!(expected.len(), 9);
+    assert_eq!(expected.len(), 9); // one row per task status
     for (task, status) in expected {
         match (S::try_from(task), status) {
             (Ok(got), Some(want)) => assert_eq!(got, want, "{task:?}"),

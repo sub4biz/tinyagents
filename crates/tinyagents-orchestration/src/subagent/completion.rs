@@ -88,17 +88,18 @@ impl CompletionOrigin {
         outcome: &SubagentOutcome,
         omitted_chars: usize,
     ) -> Option<CompletionRecord> {
-        let (status, text) = match &outcome.status {
-            SubagentOutcomeKind::Completed => (CompletionStatus::Success, outcome.output.clone()),
-            SubagentOutcomeKind::Incomplete(incomplete) => (
-                CompletionStatus::Incomplete,
-                if outcome.output.is_empty() {
-                    incomplete.reason.clone()
-                } else {
-                    outcome.output.clone()
-                },
-            ),
-            SubagentOutcomeKind::AwaitingInput(_) | SubagentOutcomeKind::Cancelled => return None,
+        // A cancellation is the parent's own doing: a mapping exists, but it is
+        // routing policy not to record it. A pause is not final (and has no
+        // completion status).
+        if matches!(outcome.status, SubagentOutcomeKind::Cancelled) {
+            return None;
+        }
+        let status = CompletionStatus::try_from(&outcome.status).ok()?;
+        let text = match &outcome.status {
+            SubagentOutcomeKind::Incomplete(incomplete) if outcome.output.is_empty() => {
+                incomplete.reason.clone()
+            }
+            _ => outcome.output.clone(),
         };
         let result = CompletionResult {
             text,

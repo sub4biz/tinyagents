@@ -8,6 +8,9 @@ use tinyagents_session::run_ledger::AgentRunStatus;
 use tinyagents_tasks::{CompletionStatus, NoEquivalentStatus, OrchestrationTaskStatus};
 
 use super::SubAgentJobStatus;
+
+/// Wire-style label of the `AwaitingInput` variant, for error messages.
+const AWAITING_INPUT: &str = "awaiting_input";
 use super::types::{IncompleteKind, SubagentOutcomeKind};
 
 /// `AwaitingInput` -> `Awaiting` (live); `Incomplete` with
@@ -20,7 +23,7 @@ impl From<&SubagentOutcomeKind> for OrchestrationTaskStatus {
             SubagentOutcomeKind::AwaitingInput(_) => Self::Awaiting,
             SubagentOutcomeKind::Incomplete(incomplete) => match incomplete.kind {
                 IncompleteKind::Timeout => Self::TimedOut,
-                _ => Self::Failed,
+                IncompleteKind::Unspecified | IncompleteKind::BudgetExceeded => Self::Failed,
             },
             SubagentOutcomeKind::Cancelled => Self::Cancelled,
         }
@@ -45,10 +48,9 @@ impl TryFrom<&SubagentOutcomeKind> for SubAgentJobStatus {
             SubagentOutcomeKind::Completed => Ok(Self::Completed),
             SubagentOutcomeKind::Incomplete(_) => Ok(Self::Incomplete),
             SubagentOutcomeKind::Cancelled => Ok(Self::Cancelled),
-            SubagentOutcomeKind::AwaitingInput(_) => Err(NoEquivalentStatus::new(
-                "awaiting_input",
-                "SubAgentJobStatus",
-            )),
+            SubagentOutcomeKind::AwaitingInput(_) => {
+                Err(NoEquivalentStatus::new(AWAITING_INPUT, "SubAgentJobStatus"))
+            }
         }
     }
 }
@@ -64,10 +66,9 @@ impl TryFrom<&SubagentOutcomeKind> for CompletionStatus {
             SubagentOutcomeKind::Completed => Ok(Self::Success),
             SubagentOutcomeKind::Incomplete(_) => Ok(Self::Incomplete),
             SubagentOutcomeKind::Cancelled => Ok(Self::Cancelled),
-            SubagentOutcomeKind::AwaitingInput(_) => Err(NoEquivalentStatus::new(
-                "awaiting_input",
-                "CompletionStatus",
-            )),
+            SubagentOutcomeKind::AwaitingInput(_) => {
+                Err(NoEquivalentStatus::new(AWAITING_INPUT, "CompletionStatus"))
+            }
         }
     }
 }
