@@ -13,7 +13,7 @@
 //! # Lock poisoning
 //!
 //! Every accessor returns [`TaskStoreRegistryError`] rather than unwrapping, for
-//! the same reason [`DetachedTaskRegistry`](super::DetachedTaskRegistry) does: a
+//! the same reason [`DetachedTaskRegistry`](crate::DetachedTaskRegistry) does: a
 //! panic in an unrelated task must not turn every later store lookup into a
 //! second panic.
 
@@ -22,7 +22,7 @@ use std::hash::Hash;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use super::store::{InMemoryTaskStore, JsonlTaskStore, TaskStore};
+use crate::store::{InMemoryTaskStore, JsonlTaskStore, TaskStore};
 
 /// Why a registry lookup could not complete.
 #[derive(Debug, Clone, PartialEq, Eq)]

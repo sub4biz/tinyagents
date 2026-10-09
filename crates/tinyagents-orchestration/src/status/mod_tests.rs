@@ -1,5 +1,5 @@
 use super::*;
-use tinyagents_graph::orchestration::OrchestrationTaskStatus as Task;
+use tinyagents_tasks::OrchestrationTaskStatus as Task;
 use tinyagents_session::run_ledger::AgentRunStatus as Run;
 
 const ALL_TASKS: [Task; 9] = [

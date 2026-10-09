@@ -1,6 +1,6 @@
 use super::*;
 use crate::subagent::SubAgentJobStatus as Job;
-use tinyagents_graph::orchestration::OrchestrationTaskStatus as Task;
+use tinyagents_tasks::OrchestrationTaskStatus as Task;
 use tinyagents_session::run_ledger::AgentRunStatus as Run;
 
 fn all() -> [DetachedSubagentStatus; 4] {

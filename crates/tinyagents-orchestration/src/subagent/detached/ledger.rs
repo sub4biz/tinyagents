@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use tinyagents_graph::orchestration::{
+use tinyagents_tasks::{
     OrchestrationTaskFilter, OrchestrationTaskKind, OrchestrationTaskRecord,
     OrchestrationTaskResult, OrchestrationTaskSpec, OrchestrationTaskStatus, TaskStore,
 };

@@ -17,7 +17,7 @@ use std::time::SystemTime;
 use tinyagents_harness::error::{Result, TinyAgentsError};
 use tinyagents_harness::ids::TaskId;
 
-use super::types::*;
+use crate::types::*;
 
 /// Store abstraction for managed orchestration tasks.
 ///

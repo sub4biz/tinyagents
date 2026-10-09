@@ -9,7 +9,7 @@
 
 use std::future::Future;
 
-use tinyagents_graph::orchestration::{
+use tinyagents_tasks::{
     CancelledDetachedTask, DetachedTaskRegistry, DetachedTaskRegistryError,
 };
 use tinyagents_harness::ids::TaskId;

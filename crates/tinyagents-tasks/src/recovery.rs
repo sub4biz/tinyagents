@@ -1,6 +1,6 @@
 //! Parent-facing restart-recovery note for interrupted child tasks.
 //!
-//! After a restart, [`reconcile_orphaned_tasks`](super::reconcile_orphaned_tasks)
+//! After a restart, [`reconcile_orphaned_tasks`](crate::reconcile_orphaned_tasks)
 //! settles every task whose executor died. That keeps the store honest but tells
 //! the *parent agent* nothing: its children vanished mid-flight, possibly after
 //! a tool call already changed the outside world. This module turns the sweep's
@@ -16,8 +16,8 @@
 
 use serde::Serialize;
 
-use super::reconcile::{ReconcileOutcome, ReconcileReport, task_status_label};
-use super::types::{OrchestrationTaskKind, OrchestrationTaskRecord};
+use crate::reconcile::{ReconcileOutcome, ReconcileReport, task_status_label};
+use crate::types::{OrchestrationTaskKind, OrchestrationTaskRecord};
 
 /// Most children rendered in one note; the remainder is summarised as `+N more`.
 pub const MAX_RECOVERY_CHILDREN: usize = 32;

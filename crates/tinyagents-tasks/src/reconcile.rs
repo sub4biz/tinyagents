@@ -18,8 +18,8 @@
 
 use tinyagents_harness::ids::TaskId;
 
-use super::store::TaskStore;
-use super::types::{OrchestrationTaskFilter, OrchestrationTaskRecord, OrchestrationTaskStatus};
+use crate::store::TaskStore;
+use crate::types::{OrchestrationTaskFilter, OrchestrationTaskRecord, OrchestrationTaskStatus};
 
 /// What reconciliation did to one task.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -1719,6 +1719,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tinyagents-harness",
+ "tinyagents-tasks",
  "tinyinference-llm",
  "tinytools",
  "tokio",
@@ -1823,6 +1824,7 @@ dependencies = [
  "tinyagents-registry",
  "tinyagents-runtime",
  "tinyagents-session",
+ "tinyagents-tasks",
  "tinyinference-llm",
  "tinytools",
  "tokio",
@@ -1888,6 +1890,21 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "tinyagents-tasks"
+version = "2.1.3"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tinyagents-harness",
+ "tinyinference-llm",
+ "tinytools",
+ "tokio",
 ]
 
 [[package]]

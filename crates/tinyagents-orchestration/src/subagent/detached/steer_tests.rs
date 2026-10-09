@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use tinyagents_graph::orchestration::{DetachedTaskRegistry, SteeringRegistry};
+use tinyagents_tasks::{DetachedTaskRegistry, SteeringRegistry};
 use tinyagents_harness::CancellationToken;
 use tinyagents_harness::ids::TaskId;
 use tinyagents_harness::run_queue::QueueLane;

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use tinyagents_graph::orchestration::{
+use tinyagents_tasks::{
     DetachedTaskRegistry, DetachedTaskRegistryError, DetachedTaskWaitOutcome,
 };
 use tinyagents_harness::ids::TaskId;

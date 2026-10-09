@@ -1,4 +1,4 @@
-use tinyagents_graph::orchestration::{DetachedTaskRegistry, OrchestrationTaskRecord};
+use tinyagents_tasks::{DetachedTaskRegistry, OrchestrationTaskRecord};
 use tinyagents_harness::ids::TaskId;
 
 use super::ledger::{record_agent_id, record_parent_session, record_subagent_session_id};

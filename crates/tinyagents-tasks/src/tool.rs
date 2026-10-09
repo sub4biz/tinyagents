@@ -1,7 +1,7 @@
 //! Ordinary harness tools for graph orchestration controls.
 //!
 //! This file is the model-facing edge of the module: it turns each
-//! [`OrchestrationToolKind`](super::OrchestrationToolKind) into a normal
+//! [`OrchestrationToolKind`](crate::OrchestrationToolKind) into a normal
 //! [`Tool`] backed by a [`TaskStore`], parses/validates the JSON tool-call
 //! arguments, and hands off to the store for the actual state transition.
 //! `types.rs` owns the data model these tools read and write; `store.rs` owns
@@ -23,8 +23,8 @@ use tinyinference_llm::message::Message;
 use tinyinference_llm::tool::ToolSchema;
 use tinytools::{Tool, ToolResult};
 
-use super::store::{TaskStore, orchestration_not_found};
-use super::types::*;
+use crate::store::{TaskStore, orchestration_not_found};
+use crate::types::*;
 
 /// A registry mapping managed task ids to the live [`SteeringHandle`] of the
 /// run executing that task.

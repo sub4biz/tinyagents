@@ -16,7 +16,7 @@
 //! Every mapping is total or fails with [`NoEquivalentStatus`]; lossy ones say
 //! so in their documentation.
 
-use tinyagents_graph::orchestration::OrchestrationTaskStatus;
+use tinyagents_tasks::OrchestrationTaskStatus;
 use tinyagents_session::run_ledger::AgentRunStatus;
 
 mod types;
