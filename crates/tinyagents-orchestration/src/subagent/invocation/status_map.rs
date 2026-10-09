@@ -1,8 +1,8 @@
 //! Conversions from [`SubAgentJobStatus`] to the other status vocabularies.
 //! See the crate README for the full map.
 
-use tinyagents_graph::orchestration::OrchestrationTaskStatus;
 use tinyagents_session::run_ledger::AgentRunStatus;
+use tinyagents_tasks::OrchestrationTaskStatus;
 
 use super::types::{SubAgentJob, SubAgentJobStatus};
 use crate::status::NoEquivalentStatus;

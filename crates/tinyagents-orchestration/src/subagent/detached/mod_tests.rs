@@ -1,13 +1,13 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use tinyagents_graph::orchestration::{
+use tinyagents_harness::CancellationToken;
+use tinyagents_harness::ids::TaskId;
+use tinyagents_tasks::{
     DetachedTaskRegistry, InMemoryTaskStore, OrchestrationControlOutcome, OrchestrationTaskFilter,
     OrchestrationTaskKind, OrchestrationTaskRecord, OrchestrationTaskResult, OrchestrationTaskSpec,
     OrchestrationTaskStatus, SteeringRegistry, TaskStore,
 };
-use tinyagents_harness::CancellationToken;
-use tinyagents_harness::ids::TaskId;
 use tokio::sync::watch;
 
 use super::*;
@@ -540,7 +540,7 @@ fn reused_task_id_surfaces_the_insert_failure_and_leaves_the_record() {
 
 #[test]
 fn registry_errors_map_onto_wait_errors() {
-    use tinyagents_graph::orchestration::DetachedTaskRegistryError as E;
+    use tinyagents_tasks::DetachedTaskRegistryError as E;
     assert_eq!(WaitError::from(E::NotOwned), WaitError::NotOwned);
     assert_eq!(
         WaitError::from(E::LockPoisoned),

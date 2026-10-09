@@ -1,8 +1,12 @@
-# graph::orchestration
+# tinyagents-tasks
 
-Graph-level orchestration controls.
+Graph-independent detached-task machinery: task model, `TaskStore`
+implementations, the detached task registry, restart reconciliation and the
+orchestration control tools. `tinyagents-graph` and `tinyagents-orchestration`
+both depend on this crate; it does not depend on the graph engine. The old
+`tinyagents_graph::orchestration::*` paths remain as plain re-exports.
 
-This module is the graph runtime's managed child-work surface. It gives
+This crate is the managed child-work surface. It gives
 language-model orchestrators stable task ids and typed controls — `spawn`,
 `await`, `cancel`, `kill`, `status`, `list`, `timeout`, `race`, `yield`, and
 `steer` — without exposing raw executor handles such as `tokio::JoinHandle`.
@@ -124,6 +128,7 @@ Nothing here ever relaunches a task. For the per-tool-call side of recovery see
 
 | File | Role |
 | --- | --- |
+| `lib.rs` | Module declarations and re-exports. |
 | `types.rs` | Task kind/status/spec/result/record/filter types, `OrchestrationToolKind`, `OrchestrationControlOutcome`, and the `DetachedTaskRegistry` snapshot/error types. |
 | `tool.rs` | `OrchestrationTool`, `SteeringRegistry`, tool constructors and schemas. |
 | `store.rs` | `TaskStore` trait, `InMemoryTaskStore`, `JsonlTaskStore`. |
@@ -131,7 +136,7 @@ Nothing here ever relaunches a task. For the per-tool-call side of recovery see
 | `runtime.rs` | `DetachedTaskRegistry<Metadata, Status>` — process-local executor handles keyed by task id. |
 | `reconcile.rs` | `reconcile_orphaned_tasks` and its report types, for settling orphans left by a dead executor. |
 | `recovery.rs` | `recovery_children` / `build_restart_recovery_note`: the parent-facing roster of interrupted children after a reconcile sweep (tests in `recovery_tests.rs`). |
-| `test.rs` | Unit tests (spawn/await/cancel/timeout/race semantics, store round-trips, filters, reconciliation, detached-task registry). |
+| `lib_tests.rs` | Unit tests (spawn/await/cancel/timeout/race semantics, store round-trips, filters, reconciliation, detached-task registry). |
 
 ## Operational constraints
 

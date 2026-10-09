@@ -147,6 +147,7 @@ they use. Shared runtime errors live in `tinyagents-harness`.
 crates/
   tinyagents-harness/           # models, tools, middleware, providers, runtime
   tinyagents-graph/             # durable typed state graphs
+  tinyagents-tasks/             # graph-independent detached-task registry, task stores, orchestration tools
   tinyagents-registry/          # named capabilities and model catalog
   tinyagents-session/           # durable session history and run ledger
   tinyagents-definition/        # host-owned agent definition vocabulary

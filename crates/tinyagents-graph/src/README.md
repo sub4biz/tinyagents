@@ -25,7 +25,7 @@ carry their own `README.md` — see the module map below.
 | `export` | Graph introspection/visualization: topology extraction, Mermaid/JSON export, validation reports. |
 | `goals` | A durable per-thread goal (single "completion contract"), continuation loop, and harness tools. See [`goals/README.md`](goals/README.md). |
 | `observability` | Durable graph observability: journals, status stores, the journaling sink, latency/health rollups, Langfuse export. See [`observability/README.md`](observability/README.md). |
-| `orchestration` | Managed child-work controls (`spawn`/`await`/`cancel`/... ) exposed as harness tools, backed by a `TaskStore`. See [`orchestration/README.md`](orchestration/README.md). |
+| `orchestration` | Managed child-work controls (`spawn`/`await`/`cancel`/... ) exposed as harness tools, backed by a `TaskStore`. Now lives in `tinyagents-tasks` ([README](../../tinyagents-tasks/src/README.md)); this module only re-exports it for compatibility. |
 | `parallel` | `map_reduce` — ordered, bounded-concurrency parallel map/reduce with a configurable failure policy, independent of the graph executor. |
 | `recursion` | Recursion policy and depth tracking: `RecursionFrame`/`RecursionPolicy`/`RecursionStack`/`RunTree` bound and observe nested graph/subgraph/sub-agent recursion. See [`recursion/README.md`](recursion/README.md). |
 | `reducer` | `StateReducer`/`Reducer` implementations (overwrite, append, min/max, set-union, closures) that fold branch updates into committed state at a superstep boundary. See [`reducer/README.md`](reducer/README.md). |

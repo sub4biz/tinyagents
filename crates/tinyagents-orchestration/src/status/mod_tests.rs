@@ -1,6 +1,6 @@
 use super::*;
-use tinyagents_graph::orchestration::OrchestrationTaskStatus as Task;
 use tinyagents_session::run_ledger::AgentRunStatus as Run;
+use tinyagents_tasks::OrchestrationTaskStatus as Task;
 
 const ALL_TASKS: [Task; 9] = [
     Task::Pending,

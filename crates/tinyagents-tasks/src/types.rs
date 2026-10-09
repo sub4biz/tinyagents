@@ -448,7 +448,7 @@ pub struct OrchestrationControlOutcome {
 
 /// A read-only snapshot of one process-local detached task runtime.
 ///
-/// Durable lifecycle state belongs in a [`TaskStore`](super::TaskStore). This
+/// Durable lifecycle state belongs in a [`TaskStore`](crate::TaskStore). This
 /// snapshot carries only the live executor metadata and status needed by a
 /// supervisor while the current process still owns the task.
 #[derive(Clone, Debug)]

@@ -1,8 +1,8 @@
 use super::*;
 use crate::status::NoEquivalentStatus;
 use crate::subagent::SubAgentJobId;
-use tinyagents_graph::orchestration::OrchestrationTaskStatus as Task;
 use tinyagents_session::run_ledger::AgentRunStatus as Run;
+use tinyagents_tasks::OrchestrationTaskStatus as Task;
 
 use SubAgentJobStatus as Job;
 

@@ -9,12 +9,10 @@
 
 use std::future::Future;
 
-use tinyagents_graph::orchestration::{
-    CancelledDetachedTask, DetachedTaskRegistry, DetachedTaskRegistryError,
-};
 use tinyagents_harness::ids::TaskId;
 use tinyagents_harness::run_queue::QueueLane;
 use tinyagents_harness::steering::{RecentRequestIds, SteeringCommand, SteeringHandle};
+use tinyagents_tasks::{CancelledDetachedTask, DetachedTaskRegistry, DetachedTaskRegistryError};
 use tinyinference_llm::message::Message;
 
 use super::types::{DetachedSubagentStatus, SubagentIdentity, WaitError};

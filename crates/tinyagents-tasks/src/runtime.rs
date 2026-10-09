@@ -1,6 +1,6 @@
 //! Process-local runtime handles for detached orchestration tasks.
 //!
-//! [`TaskStore`](super::TaskStore) remains the durable source of lifecycle
+//! [`TaskStore`](crate::TaskStore) remains the durable source of lifecycle
 //! truth. This registry owns the executor-only pieces that cannot survive a
 //! process restart: status watch channels, cooperative cancellation tokens,
 //! hard-abort handles, ownership checks, and live steering lookup.
@@ -12,12 +12,12 @@ use std::time::Duration;
 use tokio::sync::watch;
 use tokio::task::AbortHandle;
 
-use crate::{Result, TinyAgentsError};
 use tinyagents_harness::cancel::CancellationToken;
+use tinyagents_harness::error::{Result, TinyAgentsError};
 use tinyagents_harness::ids::TaskId;
 use tinyagents_harness::steering::{RecentRequestIds, SteeringHandle};
 
-use super::{
+use crate::{
     CancelledDetachedTask, DetachedTaskRegistryError, DetachedTaskSnapshot,
     DetachedTaskWaitOutcome, SteeringRegistry,
 };
@@ -45,7 +45,7 @@ type RegistryGuard<'a, Metadata, Status> =
 /// corresponding [`SteeringHandle`] from the shared [`SteeringRegistry`].
 ///
 /// This type intentionally does not duplicate durable state. Applications
-/// should insert and transition the matching task in a [`TaskStore`](super::TaskStore)
+/// should insert and transition the matching task in a [`TaskStore`](crate::TaskStore)
 /// as statuses are published. On restart, any non-terminal store record without
 /// a runtime entry is an orphan for the application to reconcile.
 #[derive(Clone)]

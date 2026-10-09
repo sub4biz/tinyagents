@@ -1,11 +1,11 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use tinyagents_graph::orchestration::{DetachedTaskRegistry, SteeringRegistry};
 use tinyagents_harness::CancellationToken;
 use tinyagents_harness::ids::TaskId;
 use tinyagents_harness::run_queue::QueueLane;
 use tinyagents_harness::steering::SteeringHandle;
+use tinyagents_tasks::{DetachedTaskRegistry, SteeringRegistry};
 use tokio::sync::watch;
 
 use super::*;

@@ -89,7 +89,7 @@ The effect ledger writes `started` before a call executes, which is why "no
 row" means "never began"; hosts that did not attach the ledger must not rely on
 `Resume`. Nothing here re-runs a tool or writes to the ledger. For the
 parent-facing note about interrupted *children* see
-`tinyagents_graph::orchestration::build_restart_recovery_note`.
+`tinyagents_tasks::build_restart_recovery_note`.
 
 ## Layout of this module
 

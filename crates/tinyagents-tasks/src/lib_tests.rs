@@ -795,8 +795,8 @@ async fn steer_tool_redirect_without_payload_is_rejected() {
     .await
     .expect_err("redirect without payload is rejected");
     assert!(matches!(
-        err.downcast_ref::<crate::TinyAgentsError>(),
-        Some(crate::TinyAgentsError::Validation(_))
+        err.downcast_ref::<tinyagents_harness::error::TinyAgentsError>(),
+        Some(tinyagents_harness::error::TinyAgentsError::Validation(_))
     ));
 }
 

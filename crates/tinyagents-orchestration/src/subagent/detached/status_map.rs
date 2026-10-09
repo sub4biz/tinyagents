@@ -2,8 +2,8 @@
 //! vocabularies. The payloads (output, question, error) are dropped; only the
 //! lifecycle state maps. See the crate README for the full map.
 
-use tinyagents_graph::orchestration::OrchestrationTaskStatus;
 use tinyagents_session::run_ledger::AgentRunStatus;
+use tinyagents_tasks::OrchestrationTaskStatus;
 
 use super::types::DetachedSubagentStatus;
 use crate::status::NoEquivalentStatus;

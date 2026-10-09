@@ -14,10 +14,10 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
-use crate::{Result, TinyAgentsError};
+use tinyagents_harness::error::{Result, TinyAgentsError};
 use tinyagents_harness::ids::TaskId;
 
-use super::types::*;
+use crate::types::*;
 
 /// Store abstraction for managed orchestration tasks.
 ///

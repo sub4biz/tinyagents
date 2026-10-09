@@ -71,7 +71,7 @@ caller-supplied adapter — can be certified by running the same assertions:
   ordering/limit/cycle-termination, `copy_thread` semantics (including
   rejecting a non-empty target), and per-namespace `prune`.
 - `taskstore_contract(store)` — basic CRUD/lifecycle contract for a
-  `graph::orchestration::TaskStore` implementation.
+  `tinyagents_tasks::TaskStore` implementation.
 - `taskstore_concurrent_contract(store: Arc<S>)` — concurrent-access contract
   (no lost updates, no corrupted records under concurrent writers).
 - `taskstore_replay_contract(reopen)` — durability contract: a store reopened

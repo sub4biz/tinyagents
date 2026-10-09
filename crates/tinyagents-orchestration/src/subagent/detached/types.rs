@@ -1,6 +1,6 @@
 //! Data definitions for the detached subagent runtime.
 
-use tinyagents_graph::orchestration::DetachedTaskRegistryError;
+use tinyagents_tasks::DetachedTaskRegistryError;
 
 /// Terminal/transient state of a detached subagent, published by the
 /// spawner's background task and observed by waiters.

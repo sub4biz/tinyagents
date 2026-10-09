@@ -1,6 +1,11 @@
-//! Graph-level orchestration controls.
+//! Graph-independent detached-task machinery for TinyAgents.
 //!
-//! This module is the graph runtime's managed child-work surface. It gives
+//! This crate is the managed child-work surface: task model, `TaskStore`
+//! implementations, the detached task registry, restart reconciliation and the
+//! orchestration control tools. It does not depend on the graph engine, so
+//! `tinyagents-graph` and `tinyagents-orchestration` both build on it.
+//!
+//! It gives
 //! language-model orchestrators stable task ids and typed controls (`spawn`,
 //! `await`, `cancel`, `kill`, `status`, `list`, `timeout`, `race`, `yield`, and
 //! `steer`) without exposing raw executor handles such as `tokio::JoinHandle`.
@@ -37,5 +42,5 @@ pub use tool::{
 pub use types::*;
 
 #[cfg(test)]
-#[path = "mod_tests.rs"]
+#[path = "lib_tests.rs"]
 mod test;

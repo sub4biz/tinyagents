@@ -1,7 +1,7 @@
 //! Detached (background) subagent runtime vocabulary.
 //!
 //! The process-local mechanics (watch channel, cancel token, abort handle,
-//! ownership) live in `tinyagents_graph::orchestration::DetachedTaskRegistry`;
+//! ownership) live in `tinyagents_tasks::DetachedTaskRegistry`;
 //! the durable lifecycle lives in an `orchestration::TaskStore`. This module
 //! is the host-neutral layer between them for subagents:
 //!
