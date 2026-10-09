@@ -96,7 +96,18 @@ Six tables plus one FTS5 virtual table, created on demand and idempotently:
 | `run_events` / `run_telemetry` | per-run event stream and rollups |
 | `agent_teams` / `agent_team_members` / `agent_team_tasks` | team coordination |
 
-WAL journaling and `foreign_keys = ON`. FTS5 comes from `rusqlite`'s `bundled`
+The file is opened through the tinystoragedrivers SQLite driver's native
+mode (`SqliteNative`): one shared connection per file per process, which any
+other handle the host opens on `sessions.db` also uses. WAL journaling,
+`foreign_keys = ON` and a 5 s busy timeout.
+
+**Durability:** the driver runs WAL with `synchronous = NORMAL`. A commit
+survives a process crash, but after an OS crash or power loss the most
+recent committed transactions can be rolled back. The database itself stays
+consistent and opens normally; what is lost is the tail of recent writes
+(the last turns' history rows, run-ledger updates). Anything that must
+survive power loss byte-for-byte belongs in the transcript files, which
+remain the source of truth for resume. FTS5 comes from `rusqlite`'s `bundled`
 build — there is no separate `fts5` cargo feature at 0.40, so do not add one.
 
 ## Operational constraints
