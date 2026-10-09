@@ -438,3 +438,56 @@ async fn recovery_note_skips_pull_only_and_leased_records() {
     assert!(!note.contains("result of off"));
     assert!(!note.contains("result of leased"));
 }
+
+#[tokio::test]
+async fn a_task_id_reused_by_another_parent_is_reported_not_swallowed() {
+    let router = router();
+    router.record(record("t1", "p")).await.unwrap();
+    assert_eq!(
+        router.record(record("t1", "other")).await.unwrap(),
+        RecordOutcome::IdCollision
+    );
+    assert!(router.pending_for("other").is_empty());
+}
+
+struct FailingSecondPut {
+    inner: InMemoryCompletionStore,
+    puts: std::sync::atomic::AtomicUsize,
+    fail_from: std::sync::atomic::AtomicUsize,
+}
+
+impl CompletionStore for FailingSecondPut {
+    fn get(&self, task_id: &str) -> Option<CompletionRecord> {
+        self.inner.get(task_id)
+    }
+    fn put(&self, record: &CompletionRecord) -> tinyagents_harness::error::Result<()> {
+        use std::sync::atomic::Ordering::SeqCst;
+        if self.puts.fetch_add(1, SeqCst) >= self.fail_from.load(SeqCst) {
+            return Err(tinyagents_harness::error::TinyAgentsError::Graph(
+                "disk".into(),
+            ));
+        }
+        self.inner.put(record)
+    }
+    fn list(&self, parent_key: Option<&str>) -> Vec<CompletionRecord> {
+        self.inner.list(parent_key)
+    }
+}
+
+#[tokio::test]
+async fn a_failed_batch_claim_leaves_nothing_leased() {
+    use std::sync::atomic::Ordering::SeqCst;
+    let store = Arc::new(FailingSecondPut {
+        inner: InMemoryCompletionStore::new(),
+        puts: Default::default(),
+        fail_from: std::sync::atomic::AtomicUsize::new(usize::MAX),
+    });
+    let router = CompletionRouter::new(store.clone());
+    router.record(record("a", "p")).await.unwrap();
+    router.record(record("b", "p")).await.unwrap();
+    // Let the first claim write succeed and the second fail.
+    store.fail_from.store(store.puts.load(SeqCst) + 1, SeqCst);
+    assert!(router.claim_pending("p", 10).is_err());
+    store.fail_from.store(usize::MAX, SeqCst);
+    assert_eq!(router.claim_pending("p", 10).unwrap().len(), 2);
+}

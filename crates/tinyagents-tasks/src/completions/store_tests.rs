@@ -213,3 +213,25 @@ async fn the_log_stays_appendable_after_compaction_in_the_same_process() {
     drop(router);
     assert_eq!(open_router(&path).pending_for("p").len(), 2);
 }
+
+#[tokio::test]
+async fn a_cancelled_parent_stays_cancelled_after_a_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("completions.jsonl");
+    {
+        let router = open_router(&path);
+        router.cancel_parent("p").unwrap();
+    }
+    let router = open_router(&path);
+    assert_eq!(
+        router.record(record("late", "p")).await.unwrap(),
+        RecordOutcome::Suppressed
+    );
+    router.resume_parent("p");
+    drop(router);
+    let router = open_router(&path);
+    assert!(matches!(
+        router.record(record("later", "p")).await.unwrap(),
+        RecordOutcome::Recorded { .. }
+    ));
+}

@@ -337,3 +337,42 @@ fn applied_results_convert_without_loss() {
     assert_eq!(result.omitted_chars, 40);
     assert_eq!(result.artifact.unwrap().id, "art-1");
 }
+
+#[tokio::test]
+async fn truncation_metadata_reaches_the_completion() {
+    struct Capped;
+    #[async_trait]
+    impl SubagentPlanner<String> for Capped {
+        async fn prepare(
+            &self,
+            request: SubagentRequest<String>,
+        ) -> Result<PreparedSubagent<String>, SubagentError> {
+            let parts = request.into_parts();
+            Ok(PreparedSubagent::new(
+                parts.task_key.task_id,
+                "worker",
+                vec![Message::user(parts.input)],
+                ToolSnapshot::new(vec![]).unwrap(),
+                parts.run_context,
+            )
+            .with_notify_mode(NotifyMode::Off)
+            .with_completion_parent("p")
+            .with_result_policy(ResultPolicy::new().with_max_chars(20)))
+        }
+    }
+    let router = router();
+    let driver = SubagentDriver::new(SubagentCapabilities {
+        planner: Some(Arc::new(Capped)),
+        executor: Some(Arc::new(Executor(Arc::new(|task| {
+            Ok(SubagentOutcome::completed(task, "x".repeat(500)))
+        })))),
+        persistence: Some(Arc::new(Memory::default())),
+    })
+    .unwrap()
+    .with_completion_router(router.clone());
+    driver
+        .run(request("t1"), CancellationToken::new())
+        .await
+        .unwrap();
+    assert!(router.pending_for("p")[0].result.omitted_chars > 0);
+}

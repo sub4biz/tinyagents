@@ -196,7 +196,8 @@ impl CompletionRouter {
                     return Ok(RecordOutcome::Suppressed);
                 }
                 Some(existing)
-                    if !existing.parent_key.is_empty() && existing.parent_key != record.parent_key =>
+                    if !existing.parent_key.is_empty()
+                        && existing.parent_key != record.parent_key =>
                 {
                     tracing::warn!(
                         task_id = %record.task_id,
@@ -390,7 +391,7 @@ impl CompletionRouter {
             .collect();
         sort_oldest_first(&mut candidates);
         candidates.truncate(max);
-        let mut claimed = Vec::with_capacity(candidates.len());
+        let mut claimed: Vec<CompletionRecord> = Vec::with_capacity(candidates.len());
         for mut record in candidates {
             record.attempts += 1;
             record.updated_at = SystemTime::now();
