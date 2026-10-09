@@ -94,7 +94,7 @@ across every backend in one test file:
 
 ```rust
 use tinyagents_graph::checkpoint::{FileCheckpointer, InMemoryCheckpointer};
-use tinyagents_graph::orchestration::{InMemoryTaskStore, JsonlTaskStore};
+use tinyagents_tasks::{InMemoryTaskStore, JsonlTaskStore};
 use tinyagents_graph::testkit::conformance::{
     checkpointer_concurrent_contract, taskstore_concurrent_contract, taskstore_replay_contract,
 };
