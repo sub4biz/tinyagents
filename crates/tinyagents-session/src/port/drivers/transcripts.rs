@@ -430,6 +430,21 @@ impl HistoryInner {
         )
     }
 
+    /// Brings the index up to this replay on a read, best effort. A write
+    /// whose index refresh failed is otherwise only repaired by the next
+    /// write, and a transcript nobody writes again would stay invisible to
+    /// thread and agent lookups. Usually one read of a fresh index document.
+    async fn repair_index(&self, replay: &mut Replay) {
+        if let Err(error) = self.index(replay).await {
+            tracing::debug!(
+                target: "tinyagents_session::port::drivers",
+                stem = %self.stem,
+                %error,
+                "[session-store] transcript index repair on read failed"
+            );
+        }
+    }
+
     /// Refreshes this stem's [`INDEX`] document when its lookup fields
     /// changed.
     ///
@@ -507,6 +522,7 @@ impl TranscriptRead for DriverTranscriptHistory {
         Ok(run_on(&self.bridge, async move {
             let mut replay = inner.replay.lock().await;
             inner.refresh(&mut replay).await?;
+            inner.repair_index(&mut replay).await;
             Ok(replay.written.then(|| SessionTranscript {
                 meta: replay.meta.clone().unwrap_or_else(|| inner.seed.clone()),
                 messages: replay.messages.clone(),
