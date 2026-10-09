@@ -229,8 +229,9 @@ impl DriverSessionStores {
 impl SessionStoreProvider for DriverSessionStores {
     /// The stores of `agent_id`.
     ///
-    /// Fails closed: when the backend cannot bind the agent's scope, the
-    /// stores returned refuse every call with that error rather than fall
+    /// Fails closed: when the backend cannot bind the agent's scope, or
+    /// [`Self::recover_on_open`]'s sweep fails, the stores returned refuse
+    /// every call with that error rather than fall
     /// back to somewhere the agent's data does not belong. They are not
     /// cached, so the next call tries the backend again.
     fn for_agent(&self, agent_id: &str) -> AgentStores {

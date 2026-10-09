@@ -590,3 +590,21 @@ fn a_stale_handle_never_rewinds_the_index() {
     assert!(locator.root_for_thread("new").is_some());
     assert!(locator.root_for_thread("old").is_none());
 }
+
+#[test]
+fn a_read_repairs_an_index_a_write_could_not_refresh() {
+    let docs = docs();
+    let locator = locator(&docs);
+    let history = locator.handle("s", meta("t"));
+    history.append(message("user", "a")).unwrap();
+    // The index refresh after that write was lost.
+    let raw = Arc::clone(&docs);
+    on_bridge(async move { raw.delete(INDEX, &doc_key(&["s"]), Precondition::None).await });
+    assert!(locator.root_for_thread("t").is_none());
+    locator
+        .handle("s", meta("t"))
+        .read_session()
+        .unwrap()
+        .unwrap();
+    assert!(locator.root_for_thread("t").is_some(), "the read re-indexed it");
+}

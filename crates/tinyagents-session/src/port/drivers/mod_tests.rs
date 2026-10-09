@@ -267,3 +267,166 @@ async fn an_unbindable_scope_fails_closed() {
     );
     provider.recover().unwrap();
 }
+
+/// A memory backend whose documents fail every query while `down` is set.
+#[derive(Debug)]
+struct Flaky {
+    storage: MemoryStorage,
+    down: Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[derive(Debug)]
+struct FlakyDocs {
+    inner: Arc<dyn tinystoragedrivers_core::DocumentStore>,
+    down: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl FlakyDocs {
+    fn check(&self) -> Result<(), StorageError> {
+        if self.down.load(std::sync::atomic::Ordering::SeqCst) {
+            Err(StorageError::unavailable("flaky backend is down"))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[tinystoragedrivers_core::async_trait]
+impl tinystoragedrivers_core::DocumentStore for FlakyDocs {
+    fn capabilities(&self) -> tinystoragedrivers_core::Capabilities {
+        self.inner.capabilities()
+    }
+    async fn ensure_collection(
+        &self,
+        spec: &tinystoragedrivers_core::CollectionSpec,
+    ) -> Result<(), StorageError> {
+        self.inner.ensure_collection(spec).await
+    }
+    async fn get(
+        &self,
+        collection: &str,
+        id: &str,
+    ) -> Result<Option<tinystoragedrivers_core::Versioned<serde_json::Value>>, StorageError> {
+        self.inner.get(collection, id).await
+    }
+    async fn put(
+        &self,
+        collection: &str,
+        id: &str,
+        doc: serde_json::Value,
+        precondition: tinystoragedrivers_core::Precondition,
+    ) -> Result<tinystoragedrivers_core::Version, StorageError> {
+        self.inner.put(collection, id, doc, precondition).await
+    }
+    async fn delete(
+        &self,
+        collection: &str,
+        id: &str,
+        precondition: tinystoragedrivers_core::Precondition,
+    ) -> Result<bool, StorageError> {
+        self.inner.delete(collection, id, precondition).await
+    }
+    async fn query(
+        &self,
+        collection: &str,
+        query: &tinystoragedrivers_core::Query,
+    ) -> Result<
+        tinystoragedrivers_core::Page<tinystoragedrivers_core::Versioned<serde_json::Value>>,
+        StorageError,
+    > {
+        self.check()?;
+        self.inner.query(collection, query).await
+    }
+    async fn count(
+        &self,
+        collection: &str,
+        filter: &tinystoragedrivers_core::Filter,
+    ) -> Result<u64, StorageError> {
+        self.inner.count(collection, filter).await
+    }
+    async fn delete_where(
+        &self,
+        collection: &str,
+        filter: &tinystoragedrivers_core::Filter,
+    ) -> Result<u64, StorageError> {
+        self.inner.delete_where(collection, filter).await
+    }
+    async fn claim(
+        &self,
+        collection: &str,
+        filter: &tinystoragedrivers_core::Filter,
+        sort: &[tinystoragedrivers_core::Sort],
+        patch: &serde_json::Value,
+    ) -> Result<Option<tinystoragedrivers_core::Versioned<serde_json::Value>>, StorageError> {
+        self.inner.claim(collection, filter, sort, patch).await
+    }
+    async fn drop_collection(&self, collection: &str) -> Result<(), StorageError> {
+        self.inner.drop_collection(collection).await
+    }
+}
+
+impl StorageBackend for Flaky {
+    fn driver(&self) -> &'static str {
+        "flaky"
+    }
+    fn capabilities(&self) -> tinystoragedrivers_core::Capabilities {
+        self.storage.capabilities()
+    }
+    fn for_scope(&self, scope: &Scope) -> Result<ScopedStorage, StorageError> {
+        let inner = self.storage.for_scope(scope)?;
+        Ok(ScopedStorage::new(
+            scope.clone(),
+            "flaky",
+            Arc::new(FlakyDocs {
+                inner: Arc::clone(inner.documents()),
+                down: Arc::clone(&self.down),
+            }),
+            Arc::clone(inner.streams()),
+            Arc::clone(inner.blobs()),
+        ))
+    }
+    fn database(&self, name: &str) -> Result<Arc<dyn StorageBackend>, StorageError> {
+        self.storage.database(name)
+    }
+}
+
+#[test]
+fn a_failed_recovery_fails_closed_and_is_retried() {
+    let down = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let provider = DriverSessionStores::new(Arc::new(Flaky {
+        storage: MemoryStorage::new(),
+        down: Arc::clone(&down),
+    }))
+    .unwrap()
+    .recover_on_open(true);
+
+    let error = provider.try_for_agent("a").unwrap_err();
+    assert!(error.message().contains("recovering"), "{error}");
+    let refused = provider.for_agent("a");
+    assert!(
+        refused
+            .turn_states
+            .put(&TurnState::started("t", "r", 8, "2026-01-01T00:00:00Z"))
+            .is_err(),
+        "no turn can start before recovery ran"
+    );
+    assert!(provider.agents.lock().unwrap().is_empty());
+
+    down.store(false, std::sync::atomic::Ordering::SeqCst);
+    let stores = provider.for_agent("a");
+    stores
+        .turn_states
+        .put(&TurnState::started("t", "r", 8, "2026-01-01T00:00:00Z"))
+        .unwrap();
+    assert_eq!(
+        provider
+            .for_agent("a")
+            .turn_states
+            .get("t")
+            .unwrap()
+            .unwrap()
+            .lifecycle,
+        TurnLifecycle::Started,
+        "a recovered agent is never swept again"
+    );
+}

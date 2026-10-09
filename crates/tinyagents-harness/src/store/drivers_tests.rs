@@ -118,6 +118,10 @@ async fn read_from_follows_long_streams_and_prefixes_isolate() {
     ab.append("c", json!("ab/c")).await.unwrap();
     assert_eq!(a.len("bc").await.unwrap(), 0, "prefixes never overlap");
     let bare = DriverAppendStore::new(Arc::clone(scoped(&storage, "local").streams()));
-    let error = bare.append("", json!(1)).await.unwrap_err();
-    assert!(matches!(error, TinyAgentsError::Validation(_)), "{error:?}");
+    bare.append("", json!("bare")).await.unwrap();
+    assert_eq!(bare.len("").await.unwrap(), 1, "a bare name is encoded too");
+    // A bare stream spelled like a prefixed one stays its own stream.
+    bare.append("1:ab", json!("bare")).await.unwrap();
+    assert_eq!(a.len("b").await.unwrap(), 0);
+    assert_eq!(a.len("").await.unwrap(), 0);
 }
