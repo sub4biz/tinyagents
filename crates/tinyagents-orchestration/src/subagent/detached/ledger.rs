@@ -16,7 +16,7 @@ pub const DETACHED_LEDGER_TIMEOUT_MS: u64 = 120_000;
 /// How many times the status watcher tries to persist a terminal status.
 pub const STATUS_WRITE_ATTEMPTS: usize = 3;
 
-fn record_status_with_retries(
+pub(super) fn record_status_with_retries(
     store: &dyn TaskStore,
     task_id: &str,
     status: &DetachedSubagentStatus,
