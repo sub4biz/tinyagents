@@ -183,9 +183,10 @@ is unchanged.
 ## Status mapping
 
 `OrchestrationTaskStatus` is canonical. Every other subagent-run status enum
-keeps its own (unchanged) wire format and converts to and from it. `From` is
-total; `TryFrom` fails with `NoEquivalentStatus`. `DetachedSubagentStatus`
-carries a payload (output, question, error), so it only converts out, by
+keeps its own (unchanged) wire format and converts to it; the payload-free ones
+(`AgentRunStatus`, `TranscriptSubagentStatus`, `CompletionStatus`,
+`SubAgentJobStatus`) also convert back. `From` is total; `TryFrom` fails with `NoEquivalentStatus`. `DetachedSubagentStatus`
+carries a payload (output, question, error), as does `SubagentOutcomeKind`; both only convert out, by
 reference (`From<&DetachedSubagentStatus>`, and `TryFrom<&_>` for `CompletionStatus`/`SubAgentJobStatus`); there is no reverse conversion because the payload cannot be reconstructed from a bare status.
 
 | Type (crate) | -> `OrchestrationTaskStatus` | `OrchestrationTaskStatus` -> |
