@@ -402,6 +402,7 @@ impl<C: Send + 'static, H: Send + 'static> SubagentDriver<C, H> {
             cancellation: child_token,
         };
         let mut timed_out = false;
+        let mut omitted_chars = 0usize;
         let mut token;
         let executed = loop {
             token = execution.cancellation.clone();
@@ -469,7 +470,10 @@ impl<C: Send + 'static, H: Send + 'static> SubagentDriver<C, H> {
                 if cancellation.is_cancelled() || (!timed_out && token.is_cancelled()) {
                     outcome.cancelled_preserving()
                 } else {
-                    apply_outcome_policies(outcome, &policy, &result_policy).await
+                    let (outcome, omitted) =
+                        apply_outcome_policies(outcome, &policy, &result_policy).await;
+                    omitted_chars = omitted;
+                    outcome
                 }
             }
             Err(SubagentError::Cancelled) => SubagentOutcome::cancelled(task_id),
@@ -481,7 +485,7 @@ impl<C: Send + 'static, H: Send + 'static> SubagentDriver<C, H> {
             .await?;
         if let (Some(router), Some(origin)) = (&self.completions, &completion_origin)
             && result.should_emit_host_effects()
-            && let Some(record) = origin.record_for_outcome(&result.outcome)
+            && let Some(record) = origin.record_for_outcome(&result.outcome, omitted_chars)
         {
             deliver(router, record).await;
         }

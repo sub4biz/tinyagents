@@ -83,7 +83,11 @@ impl CompletionOrigin {
     /// The record for a finished lifecycle, or `None` when the outcome is not a
     /// completion: a cancellation is the parent's own doing, and a pause is not
     /// final (the same task id completes later).
-    pub(crate) fn record_for_outcome(&self, outcome: &SubagentOutcome) -> Option<CompletionRecord> {
+    pub(crate) fn record_for_outcome(
+        &self,
+        outcome: &SubagentOutcome,
+        omitted_chars: usize,
+    ) -> Option<CompletionRecord> {
         let (status, text) = match &outcome.status {
             SubagentOutcomeKind::Completed => (CompletionStatus::Success, outcome.output.clone()),
             SubagentOutcomeKind::Incomplete(incomplete) => (
@@ -98,7 +102,7 @@ impl CompletionOrigin {
         };
         let result = CompletionResult {
             text,
-            omitted_chars: 0,
+            omitted_chars,
             artifact: outcome.artifacts.first().map(CompletionArtifact::from),
         };
         Some(self.record(status, result))

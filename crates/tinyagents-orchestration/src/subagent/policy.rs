@@ -123,9 +123,10 @@ pub(crate) async fn apply_outcome_policies(
     mut outcome: SubagentOutcome,
     policy: &SubAgentPolicy,
     result_policy: &ResultPolicy,
-) -> SubagentOutcome {
+) -> (SubagentOutcome, usize) {
+    let mut omitted_chars = 0;
     if !matches!(outcome.status, SubagentOutcomeKind::Completed) {
-        return outcome;
+        return (outcome, omitted_chars);
     }
     let measured = tinyagents_graph::SubAgentOutput {
         usage: outcome.usage,
@@ -140,12 +141,13 @@ pub(crate) async fn apply_outcome_policies(
         let applied = result_policy
             .apply(&outcome.task_id, &outcome.output, None)
             .await;
+        omitted_chars = applied.omitted_chars;
         outcome.output = applied.text;
         outcome.schema_error = applied.schema_error;
         outcome.artifact_error = applied.artifact_error;
         outcome.artifacts.extend(applied.artifact);
     }
-    outcome
+    (outcome, omitted_chars)
 }
 
 #[cfg(test)]

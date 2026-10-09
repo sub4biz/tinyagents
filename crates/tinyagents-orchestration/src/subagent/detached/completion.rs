@@ -151,12 +151,17 @@ pub fn spawn_status_watcher_with_completions(
                 break DetachedSubagentStatus::ended_without_result();
             }
         };
-        let cancelled = matches!(
-            store.get(&TaskId::new(&task_id)).map(|r| r.status),
-            Some(OrchestrationTaskStatus::CancelRequested | OrchestrationTaskStatus::Cancelled)
-        );
+        let cancelled_now = || {
+            matches!(
+                store.get(&TaskId::new(&task_id)).map(|r| r.status),
+                Some(OrchestrationTaskStatus::CancelRequested | OrchestrationTaskStatus::Cancelled)
+            )
+        };
+        // Before the write, a requested cancel would be overwritten by it; after
+        // it, a cancel that won the race leaves the record cancelled.
+        let cancelled_before = cancelled_now();
         record_status_with_retries(store.as_ref(), &task_id, &terminal);
-        if cancelled {
+        if cancelled_before || cancelled_now() {
             tracing::debug!("{LOG_PREFIX} task_id={task_id} cancelled; not recorded");
             return;
         }

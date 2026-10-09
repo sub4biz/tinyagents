@@ -31,6 +31,11 @@ pub enum RecordOutcome {
     Duplicate,
     /// Dropped: the task was tombstoned, or its parent was cancelled.
     Suppressed,
+    /// The task id is already recorded for a *different* parent. Completion ids
+    /// are the dedupe key and must be unique across parents (the host's
+    /// `sub-<uuid>` ids are); a host that reuses ids across roots must make them
+    /// unique before recording. Nothing was stored.
+    IdCollision,
 }
 
 /// What [`CompletionRouter::tombstone`] did.
@@ -52,8 +57,6 @@ struct RouterState {
     leased: HashSet<String>,
     /// Live parents and their steering queues.
     parents: HashMap<String, RunQueueHandle>,
-    /// Parents whose completions are dropped (deleted or stopped).
-    cancelled_parents: HashSet<String>,
 }
 
 /// Durable, deduplicating hand-off of finished children to their parents.
@@ -176,7 +179,7 @@ impl CompletionRouter {
     pub async fn record(&self, mut record: CompletionRecord) -> Result<RecordOutcome> {
         let push = {
             let mut state = self.lock()?;
-            if state.cancelled_parents.contains(&record.parent_key) {
+            if self.parent_cancelled(&record.parent_key) {
                 tracing::debug!(
                     task_id = %record.task_id,
                     parent_key = %record.parent_key,
@@ -191,6 +194,15 @@ impl CompletionRouter {
                         "{LOG_PREFIX} dropped: tombstoned"
                     );
                     return Ok(RecordOutcome::Suppressed);
+                }
+                Some(existing)
+                    if !existing.parent_key.is_empty() && existing.parent_key != record.parent_key =>
+                {
+                    tracing::warn!(
+                        task_id = %record.task_id,
+                        "{LOG_PREFIX} task id already recorded for another parent"
+                    );
+                    return Ok(RecordOutcome::IdCollision);
                 }
                 Some(existing) => {
                     tracing::debug!(
@@ -277,10 +289,11 @@ impl CompletionRouter {
 
     /// Drops every pending completion for `parent_key` and everything that
     /// finishes for it later, until [`Self::resume_parent`]. For a deleted or
-    /// stopped parent. Returns how many pending records were withdrawn.
+    /// stopped parent. The flag is stored durably, so it holds across a restart
+    /// (until [`Self::compact`] drops it after its retention window). Returns how many pending records were withdrawn.
     pub fn cancel_parent(&self, parent_key: &str) -> Result<usize> {
         let mut state = self.lock()?;
-        state.cancelled_parents.insert(parent_key.to_owned());
+        self.set_parent_marker(parent_key, CompletionState::Tombstoned)?;
         state.parents.remove(parent_key);
         let mut withdrawn = 0;
         for mut record in self.store.list(Some(parent_key)) {
@@ -299,9 +312,28 @@ impl CompletionRouter {
     /// Lets completions for `parent_key` through again after
     /// [`Self::cancel_parent`] (a stopped thread that the user reopened).
     pub fn resume_parent(&self, parent_key: &str) {
-        if let Ok(mut state) = self.lock() {
-            state.cancelled_parents.remove(parent_key);
+        if let Err(error) = self.set_parent_marker(parent_key, CompletionState::Delivered) {
+            tracing::warn!(parent_key = %parent_key, error = %error, "{LOG_PREFIX} could not resume parent");
         }
+    }
+
+    /// The cancelled-parent flag lives in the store as a marker record, so it
+    /// survives a restart with the rest of the log. `Tombstoned` means
+    /// cancelled; `Delivered` means resumed.
+    fn parent_marker_id(parent_key: &str) -> String {
+        format!("\u{1}parent-cancelled:{parent_key}")
+    }
+
+    fn parent_cancelled(&self, parent_key: &str) -> bool {
+        self.store
+            .get(&Self::parent_marker_id(parent_key))
+            .is_some_and(|m| m.state == CompletionState::Tombstoned)
+    }
+
+    fn set_parent_marker(&self, parent_key: &str, state: CompletionState) -> Result<()> {
+        let mut marker = CompletionRecord::tombstone_stub(&Self::parent_marker_id(parent_key));
+        marker.state = state;
+        self.store.put(&marker)
     }
 
     /// Every undelivered completion for `parent_key`, oldest first, in every
@@ -362,7 +394,13 @@ impl CompletionRouter {
         for mut record in candidates {
             record.attempts += 1;
             record.updated_at = SystemTime::now();
-            self.store.put(&record)?;
+            if let Err(error) = self.store.put(&record) {
+                // The caller gets no ids on error, so none may stay leased.
+                for done in &claimed {
+                    state.leased.remove(&done.task_id);
+                }
+                return Err(error);
+            }
             state.leased.insert(record.task_id.clone());
             claimed.push(record);
         }
