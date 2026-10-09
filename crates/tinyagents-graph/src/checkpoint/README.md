@@ -93,3 +93,25 @@ crashes mid-execution.
 - `DurabilityMode` trades persistence frequency for write volume — a mode that
   only checkpoints on interrupt/failure means a mid-run crash loses all
   progress since the last such boundary, not just the current node.
+
+## `DriverCheckpointer` (`storage-drivers` feature)
+
+`DriverCheckpointer` stores checkpoints, pending writes and execution leases in
+a [tinystoragedrivers](https://github.com/tinyhumansai/tinystoragedrivers)
+`DocumentStore`. Hosts use it to put graph durability on whichever backend they
+opened, such as SQLite or MongoDB. The handle is bound to a tenant scope, so
+tenants that share a thread id still never see each other's checkpoints.
+
+It uses four collections, all prefixed `graph` by default:
+
+- `<prefix>_checkpoints`: one document per stored checkpoint, keyed by a
+  per-thread insertion sequence. Duplicate ids resolve to the latest write,
+  as in the append-only backends.
+- `<prefix>_threads`: the per-thread sequence counter, advanced with
+  compare-and-swap.
+- `<prefix>_writes`: merged pending writes per `(thread, namespace, checkpoint)`.
+- `<prefix>_leases`: per-thread execution leases, claimed, renewed and
+  released with compare-and-swap.
+
+It passes the same `testkit::conformance` contracts as the bundled backends:
+checkpointer, writes, lineage and concurrency.

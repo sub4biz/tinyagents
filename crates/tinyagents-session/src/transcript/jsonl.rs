@@ -616,29 +616,65 @@ pub(super) fn serialise_message_lines(
     request_id: Option<&str>,
     buf: &mut String,
 ) -> Result<()> {
-    let last_assistant_idx = messages.iter().rposition(|m| m.role == "assistant");
-    let turn_stamps = turn_step_stamps(messages, last_assistant_idx, last_assistant_turn_usage);
-    for (i, msg) in messages.iter().enumerate() {
-        let turn_usage = if Some(i) == last_assistant_idx {
-            last_assistant_turn_usage
-                .cloned()
-                .or_else(|| msg.turn_usage.clone())
-        } else {
-            msg.turn_usage.clone()
-        };
-        let mut line = build_message_line(msg, turn_usage.as_ref(), request_id, false);
-        if let Some((iteration, ts)) = turn_stamps.get(&i) {
-            line.iteration = line.iteration.or(Some(*iteration));
-            if line.ts.is_none() && !ts.is_empty() {
-                line.ts = Some(ts.clone());
-            }
-        }
+    for (i, line) in stamped_lines(messages, last_assistant_turn_usage, request_id)
+        .into_iter()
+        .enumerate()
+    {
         let line_json =
             serde_json::to_string(&line).with_context(|| format!("serialise message line {i}"))?;
         buf.push_str(&line_json);
         buf.push('\n');
     }
     Ok(())
+}
+
+/// The lines [`serialise_message_lines`] writes for `messages`: the turn's
+/// usage on its last assistant row, `request_id` on every fresh row, and the
+/// per-step `(iteration, ts)` stamps.
+fn stamped_lines(
+    messages: &[TranscriptMessage],
+    last_assistant_turn_usage: Option<&TurnUsage>,
+    request_id: Option<&str>,
+) -> Vec<MessageLine> {
+    let last_assistant_idx = messages.iter().rposition(|m| m.role == "assistant");
+    let turn_stamps = turn_step_stamps(messages, last_assistant_idx, last_assistant_turn_usage);
+    messages
+        .iter()
+        .enumerate()
+        .map(|(i, msg)| {
+            let turn_usage = if Some(i) == last_assistant_idx {
+                last_assistant_turn_usage
+                    .cloned()
+                    .or_else(|| msg.turn_usage.clone())
+            } else {
+                msg.turn_usage.clone()
+            };
+            let mut line = build_message_line(msg, turn_usage.as_ref(), request_id, false);
+            if let Some((iteration, ts)) = turn_stamps.get(&i) {
+                line.iteration = line.iteration.or(Some(*iteration));
+                if line.ts.is_none() && !ts.is_empty() {
+                    line.ts = Some(ts.clone());
+                }
+            }
+            line
+        })
+        .collect()
+}
+
+/// `messages` exactly as the JSONL writer would record them for one turn and
+/// a reader would return them: what a non-file transcript backend stores so
+/// its replay carries the same per-turn provenance (usage, request ids,
+/// step stamps) as a transcript file.
+#[cfg(feature = "storage-drivers")]
+pub(crate) fn stamped_rows(
+    messages: &[TranscriptMessage],
+    last_assistant_turn_usage: Option<&TurnUsage>,
+    request_id: Option<&str>,
+) -> Vec<TranscriptMessage> {
+    stamped_lines(messages, last_assistant_turn_usage, request_id)
+        .into_iter()
+        .map(message_from_line)
+        .collect()
 }
 
 /// Per-step `(iteration, ts)` stamps for the intermediate assistant rows of the

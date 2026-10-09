@@ -112,6 +112,10 @@ pub use port::{
     AgentStores, InMemorySessionStores, InMemoryTranscriptLocator, InMemoryTurnStates,
     SessionStoreProvider, TurnStates,
 };
+#[cfg(feature = "storage-drivers")]
+pub use port::{
+    DriverSessionStores, DriverTranscriptHistory, DriverTranscriptLocator, DriverTurnStates,
+};
 pub use retention::{
     RetentionReport, apply_retention, prune_run_events_before, prune_run_telemetry_before,
     prune_sessions_before, prune_tool_calls_before, reindex_fts, trim_session_messages,

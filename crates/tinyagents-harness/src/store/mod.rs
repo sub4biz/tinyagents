@@ -31,6 +31,8 @@
 //! consistent names make multi-store applications easier to audit.
 
 pub mod conformance;
+#[cfg(feature = "storage-drivers")]
+mod drivers;
 pub mod namespaced;
 mod types;
 
@@ -42,6 +44,9 @@ use async_trait::async_trait;
 use serde_json::Value;
 
 pub use types::*;
+
+#[cfg(feature = "storage-drivers")]
+pub use drivers::{DriverAppendStore, DriverStore};
 
 use crate::error::{Result, TinyAgentsError};
 use crate::ids::now_ms;

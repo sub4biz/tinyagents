@@ -68,6 +68,10 @@ reachable under `session::`, `session::run_ledger::`, and
 - **Chat threads** — `ConversationStore` and its wire types (re-exported at
   the root), plus the free functions and channel subscriber under
   `session::threads` — see its own [README](./threads/README.md)
+- **Store port** — `SessionStoreProvider`, `AgentStores`, `TurnStates`,
+  `InMemorySessionStores`, and with feature `storage-drivers`
+  `DriverSessionStores` over a `tinystoragedrivers` backend — see
+  [`docs/modules/session/store-port.md`](../../../docs/modules/session/store-port.md)
 - **Connections** — `with_connection` (autocommit) and `with_transaction`
   (`BEGIN IMMEDIATE`)
 - **Testkit** — `testkit::conformance::run_ledger_conformance` and

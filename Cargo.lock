@@ -1717,10 +1717,12 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "tinyagents-harness",
  "tinyagents-tasks",
  "tinyinference-llm",
+ "tinystoragedrivers-core",
  "tinytools",
  "tokio",
  "tracing",
@@ -1756,6 +1758,7 @@ dependencies = [
  "tinyinference-image",
  "tinyinference-llm",
  "tinyinference-video",
+ "tinystoragedrivers-core",
  "tinytools",
  "tinytools-agent",
  "tokio",
@@ -1886,6 +1889,8 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tinyagents-harness",
+ "tinystoragedrivers-core",
+ "tinystoragedrivers-sqlite",
  "tinytools-agent",
  "tokio",
  "tracing",
@@ -1999,6 +2004,27 @@ dependencies = [
  "tokio-tungstenite",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "tinystoragedrivers-core"
+version = "0.3.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "tinystoragedrivers-sqlite"
+version = "0.3.0"
+dependencies = [
+ "rusqlite",
+ "serde_json",
+ "tinystoragedrivers-core",
+ "tokio",
 ]
 
 [[package]]
