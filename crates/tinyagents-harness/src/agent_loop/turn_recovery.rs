@@ -56,6 +56,9 @@ pub(super) struct TruncatedRetryPlan {
     pub(super) remaining: Option<std::time::Duration>,
     /// The first retry of this turn re-sends at the same cap on purpose.
     pub(super) first_retry: bool,
+    /// The retry goes out with reasoning switched off, so it is a different
+    /// call from the one that died even at the same cap.
+    pub(super) reasoning_off: bool,
 }
 
 impl TruncatedRetryPlan {
@@ -99,11 +102,18 @@ impl TruncatedRetryPlan {
     }
 
     pub(super) fn worth_it(&self) -> bool {
-        (self.first_retry || self.cap_grows()) && self.fits_clock()
+        (self.first_retry || self.reasoning_off || self.cap_grows()) && self.fits_clock()
+    }
+
+    /// The retry would re-send the transcript that just died, at the cap it
+    /// died at and with the same reasoning: nothing about it can go
+    /// differently.
+    pub(super) fn at_ceiling(&self) -> bool {
+        !self.first_retry && !self.reasoning_off && !self.cap_grows()
     }
 
     pub(super) fn skip_reason(&self) -> String {
-        if !self.first_retry && !self.cap_grows() {
+        if self.at_ceiling() {
             format!(
                 "the output cap is already at its ceiling ({}); re-sending the same transcript at the same cap fails the same way",
                 self.current.map_or("unset".to_string(), |c| c.to_string())
@@ -182,12 +192,16 @@ impl TruncatedRetryPlan {
 impl TurnRecovery {
     /// What a retry of the dead call that just returned would cost and
     /// whether it can change anything (see [`TruncatedRetryPlan`]).
+    /// `reasoning_off` says the retry goes out without reasoning: such a call
+    /// needs no larger cap, since the cap was for the deliberation that is
+    /// now switched off.
     pub(super) fn truncated_retry_plan(
         &self,
         attempt_max_tokens: Option<u32>,
         dead_tokens: u64,
         dead_ms: u64,
         remaining: Option<std::time::Duration>,
+        reasoning_off: bool,
     ) -> TruncatedRetryPlan {
         let first_retry = self.truncated_empty_retries_used == 0;
         let current = self.boosted_max_tokens.or(attempt_max_tokens);
@@ -195,7 +209,7 @@ impl TurnRecovery {
         let next = attempt_max_tokens.map(|sent| {
             let base = self.truncation_base.unwrap_or(sent);
             let current = self.boosted_max_tokens.unwrap_or(sent);
-            if first_retry {
+            if first_retry || reasoning_off {
                 current
             } else {
                 current.saturating_mul(2).min(base.saturating_mul(4))
@@ -209,6 +223,7 @@ impl TurnRecovery {
             dead_ms,
             remaining,
             first_retry,
+            reasoning_off,
         }
     }
 
@@ -273,20 +288,28 @@ impl TurnRecovery {
     /// A turn whose call was cut off by the output limit
     /// (`turn_had_truncated_calls`) keeps its truncated-tool-call retry budget
     /// and boosted output cap for the retry.
+    ///
+    /// A tool call is a live reply: it spends one call of the reasoning
+    /// fallback's hold-off.
     pub(super) fn reset_after_tool_turn(&mut self, turn_had_truncated_calls: bool) {
         self.reset_nudges();
         if !turn_had_truncated_calls {
             self.reset_truncation();
         }
+        self.reasoning_fallback.on_live_reply();
     }
 
     /// The turn resolved without a tool call and without scheduling another
     /// retry (it is about to be taken as the answer): clear every counter and
     /// the boosted cap, which would otherwise override the caller's per-turn
     /// cap on every later call.
+    ///
+    /// An answer is a live reply: it spends one call of the reasoning
+    /// fallback's hold-off.
     pub(super) fn reset_after_final(&mut self) {
         self.reset_nudges();
         self.reset_truncation();
+        self.reasoning_fallback.on_live_reply();
     }
 }
 

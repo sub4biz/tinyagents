@@ -423,6 +423,13 @@ pub struct RunContext<Ctx = ()> {
     /// loop (stop with a final response, or interrupt). Drained by the agent
     /// loop at its safe checkpoints via [`RunContext::take_control`].
     pub control: std::sync::Arc<std::sync::Mutex<Option<MiddlewareControl>>>,
+    /// Set by a middleware that just noted a repeat on a tool result (an
+    /// identical call re-issued, an identical reply) and read once by the
+    /// agent loop before its next model call. The loop's reasoning fallback
+    /// treats it as the signal that a model running without reasoning is
+    /// looping, and hands reasoning back for the next call. See
+    /// [`RunContext::note_repeat`].
+    pub repeat_noted: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Queued [`StateUpdate`]s a middleware or tool requested via
     /// [`MiddlewareControl::UpdateState`], drained by a host through
     /// [`RunContext::take_state_updates`]. See that method's docs for why the

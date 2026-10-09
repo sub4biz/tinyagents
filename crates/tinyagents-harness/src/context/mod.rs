@@ -313,6 +313,7 @@ impl<Ctx> RunContext<Ctx> {
             run_queue: None,
             cancellation: CancellationToken::new(),
             control: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            repeat_noted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             state_updates: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             tool_state_updates: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             terminate_votes: Vec::new(),
@@ -617,6 +618,35 @@ impl<Ctx> RunContext<Ctx> {
     /// Takes any pending [`MiddlewareControl`] request, clearing it.
     pub fn take_control(&self) -> Option<MiddlewareControl> {
         self.control.lock().ok().and_then(|mut guard| guard.take())
+    }
+
+    /// Records that a middleware just noted a repeat on a tool result (an
+    /// identical call re-issued, an identical reply). The agent loop reads it
+    /// once before its next model call ([`Self::take_repeat_noted`]); a
+    /// model running without reasoning that repeats itself is handed
+    /// reasoning back.
+    pub fn note_repeat(&self) {
+        self.repeat_noted
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Asks for reasoning on the next model call while the loop's reasoning
+    /// fallback has switched it off. Same flag as [`Self::note_repeat`]: a
+    /// middleware about to issue a call where thinking is worth a dead call's
+    /// bounded cost (the finish check, which has to ask what the request
+    /// implied) uses this. With the fallback disabled reasoning is never off,
+    /// so the request is a no-op by construction; it never raises the effort
+    /// above what the request already asks for.
+    pub fn request_reasoning(&self) {
+        self.repeat_noted
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Whether a repeat was noted (or reasoning requested) since the last
+    /// take; clears it.
+    pub fn take_repeat_noted(&self) -> bool {
+        self.repeat_noted
+            .swap(false, std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Queues a [`StateUpdate`] for the host to apply.

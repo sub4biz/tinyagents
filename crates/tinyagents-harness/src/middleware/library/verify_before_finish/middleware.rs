@@ -254,6 +254,11 @@ impl<S: Send + Sync, C: Send + Sync> Middleware<S, C> for VerifyBeforeFinishMidd
         let tool_rounds = run.activity.tool_rounds;
         drop(runs);
         response.continue_turn = Some(self.check.clone());
+        // The check is the one call in a run where thinking is worth the
+        // bounded risk of a dead call: a result fitted on the wrong axis is
+        // caught by asking what the request implied, which a model running
+        // without reasoning (the fallback after dead calls) does not do.
+        ctx.request_reasoning();
         tracing::info!(
             tool_rounds,
             remaining_model_calls = ctx.limits.remaining_model_calls(),

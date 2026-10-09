@@ -99,7 +99,9 @@ pub struct AgentLoopResult {
 /// The recovery counters and boosted output cap of the turn in flight.
 ///
 /// Every counter is consecutive-per-turn, not per-run (the output-validation
-/// retry budget, which is run-wide, lives outside this struct).
+/// retry budget, which is run-wide, lives outside this struct). The one
+/// run-wide member is [`Self::reasoning_fallback`]: its hold-off outlives the
+/// turn that set it and no turn-boundary reset touches it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct TurnRecovery {
     /// Retries of a length-truncated empty reply
@@ -125,6 +127,10 @@ pub(super) struct TurnRecovery {
     pub(super) boosted_max_tokens: Option<u32>,
     /// The original output cap, so growth stays clamped at 4x.
     pub(super) truncation_base: Option<u32>,
+    /// Reasoning switched off for the calls after a dead one (see
+    /// `RunPolicy::truncated_empty_reasoning_fallback`). Run-wide: the
+    /// hold-off outlives the turn that set it.
+    pub(super) reasoning_fallback: super::reasoning_fallback::ReasoningFallback,
 }
 
 /// The tool schemas a run advertises and the discovery state behind them.

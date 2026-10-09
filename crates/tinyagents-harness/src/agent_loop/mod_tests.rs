@@ -1084,6 +1084,11 @@ async fn truncated_empty_retry_does_not_replay_a_cached_blank() {
     ]));
     let mut harness: AgentHarness<()> = AgentHarness::new();
     harness.register_model("mock", Arc::clone(&model) as _);
+    harness.with_policy(RunPolicy {
+        // This test pins the cap ladder; keep reasoning on so the ladder runs.
+        truncated_empty_reasoning_fallback: false,
+        ..RunPolicy::default()
+    });
     harness.with_response_cache(Arc::new(InMemoryResponseCache::new()));
 
     let ctx = RunContext::new(
@@ -1166,6 +1171,11 @@ async fn truncated_empty_boost_does_not_leak_into_later_turns() {
     harness
         .register_model("mock", Arc::clone(&model) as _)
         .register_tool(Arc::new(FakeTool::new("fake", "tool output")));
+    harness.with_policy(RunPolicy {
+        // This test pins the cap ladder; keep reasoning on so the ladder runs.
+        truncated_empty_reasoning_fallback: false,
+        ..RunPolicy::default()
+    });
 
     let ctx = RunContext::new(
         RunConfig::new("truncated-leak").with_max_turn_output_tokens(2048),
@@ -1203,6 +1213,8 @@ async fn truncated_empty_retry_stops_at_the_cap_ceiling_and_nudges() {
     let mut harness: AgentHarness<()> = AgentHarness::new();
     harness.register_model("mock", Arc::clone(&model) as _);
     harness.with_policy(RunPolicy {
+        // This test pins the cap ladder; keep reasoning on so the ladder runs.
+        truncated_empty_reasoning_fallback: false,
         truncated_empty_retries: 4,
         ..RunPolicy::default()
     });
@@ -1370,6 +1382,8 @@ async fn truncated_empty_nudges_repeat_while_the_clock_allows_with_a_halving_cap
     let mut harness: AgentHarness<()> = AgentHarness::new();
     harness.register_model("mock", Arc::clone(&model) as _);
     harness.with_policy(RunPolicy {
+        // This test pins the cap ladder; keep reasoning on so the ladder runs.
+        truncated_empty_reasoning_fallback: false,
         limits: RunLimits::default().with_max_wall_clock_ms(Some(60_000)),
         ..RunPolicy::default()
     });
@@ -9260,4 +9274,443 @@ async fn dynamic_toolset_fold_is_reported_as_a_transcript_rewrite() {
         "the in-place fold is announced"
     );
     super::lifecycle_test::assert_mirrors(&events, &seed, &run.messages);
+}
+
+#[tokio::test]
+async fn a_dead_call_is_retried_with_reasoning_off_then_restored() {
+    // The one control measured to stop a model that deliberates past any
+    // cap is switching reasoning off. The retry goes out without it, at the
+    // same cap (the cap was for the deliberation), and the configured
+    // effort returns once the hold-off of one live call is spent.
+    let model = Arc::new(crate::testkit::ScriptedModel::new(vec![
+        truncated_empty_response(2048),
+        tool_call_response("c1", "fake", json!({})),
+        text_response("done", 4, 3),
+    ]));
+    let mut harness: AgentHarness<()> = AgentHarness::new();
+    harness
+        .register_model("mock", Arc::clone(&model) as _)
+        .register_tool(Arc::new(FakeTool::new("fake", "tool output")));
+    harness.with_policy(RunPolicy {
+        default_reasoning: Some(ReasoningConfig::effort(ReasoningEffort::High)),
+        ..RunPolicy::default()
+    });
+    let recorder = crate::testkit::EventRecorder::new();
+    let ctx = RunContext::new(
+        RunConfig::new("truncated-reasoning-off").with_max_turn_output_tokens(2048),
+        (),
+    )
+    .with_events(recorder.sink());
+    let run = harness
+        .invoke_in_context(&(), ctx, vec![Message::user("hi")])
+        .await
+        .expect("the run finishes");
+    assert_eq!(run.text(), Some("done".to_string()));
+    let efforts: Vec<Option<ReasoningEffort>> = model
+        .requests()
+        .iter()
+        .map(|r| r.reasoning.as_ref().and_then(|c| c.effort))
+        .collect();
+    assert_eq!(
+        efforts,
+        vec![
+            Some(ReasoningEffort::High),
+            Some(ReasoningEffort::None),
+            Some(ReasoningEffort::High)
+        ],
+        "the retry runs without reasoning; the call after the live reply gets the effort back"
+    );
+    let caps: Vec<Option<u32>> = model.requests().iter().map(|r| r.max_tokens).collect();
+    assert_eq!(
+        caps,
+        vec![Some(2048), Some(2048), Some(2048)],
+        "no cap growth for a call without reasoning"
+    );
+    assert!(
+        recorder.events().iter().any(|e| matches!(
+            e,
+            AgentEvent::ControlApplied { control, .. } if control == "reasoning_fallback"
+        )),
+        "the switch is observable; got kinds {:?}",
+        recorder.kinds()
+    );
+}
+
+#[tokio::test]
+async fn repeated_deaths_hold_reasoning_off_for_longer() {
+    // Hold-off backs off: one call after the first death, two after the
+    // second. Two live replies without reasoning then restore the effort.
+    // The second retry re-sends at the same cap too: a call without
+    // reasoning needs no larger cap.
+    let model = Arc::new(crate::testkit::ScriptedModel::new(vec![
+        truncated_empty_response(2048),
+        truncated_empty_response(2048),
+        tool_call_response("c1", "fake", json!({})),
+        tool_call_response("c2", "fake", json!({})),
+        text_response("done", 4, 3),
+    ]));
+    let mut harness: AgentHarness<()> = AgentHarness::new();
+    harness
+        .register_model("mock", Arc::clone(&model) as _)
+        .register_tool(Arc::new(FakeTool::new("fake", "tool output")));
+    harness.with_policy(RunPolicy {
+        default_reasoning: Some(ReasoningConfig::effort(ReasoningEffort::High)),
+        ..RunPolicy::default()
+    });
+    let ctx = RunContext::new(
+        RunConfig::new("truncated-reasoning-backoff").with_max_turn_output_tokens(2048),
+        (),
+    );
+    let run = harness
+        .invoke_in_context(&(), ctx, vec![Message::user("hi")])
+        .await
+        .expect("the run finishes");
+    assert_eq!(run.text(), Some("done".to_string()));
+    let efforts: Vec<Option<ReasoningEffort>> = model
+        .requests()
+        .iter()
+        .map(|r| r.reasoning.as_ref().and_then(|c| c.effort))
+        .collect();
+    assert_eq!(
+        efforts,
+        vec![
+            Some(ReasoningEffort::High),
+            Some(ReasoningEffort::None),
+            Some(ReasoningEffort::None),
+            Some(ReasoningEffort::None),
+            Some(ReasoningEffort::High),
+        ]
+    );
+    let caps: Vec<Option<u32>> = model.requests().iter().map(|r| r.max_tokens).collect();
+    assert_eq!(
+        caps,
+        vec![Some(2048), Some(2048), Some(2048), Some(2048), Some(2048)]
+    );
+}
+
+#[tokio::test]
+async fn the_reasoning_fallback_can_be_switched_off() {
+    let model = Arc::new(crate::testkit::ScriptedModel::new(vec![
+        truncated_empty_response(2048),
+        text_response("recovered", 4, 3),
+    ]));
+    let mut harness: AgentHarness<()> = AgentHarness::new();
+    harness.register_model("mock", Arc::clone(&model) as _);
+    harness.with_policy(RunPolicy {
+        default_reasoning: Some(ReasoningConfig::effort(ReasoningEffort::High)),
+        truncated_empty_reasoning_fallback: false,
+        ..RunPolicy::default()
+    });
+    let ctx = RunContext::new(
+        RunConfig::new("truncated-reasoning-kept").with_max_turn_output_tokens(2048),
+        (),
+    );
+    let run = harness
+        .invoke_in_context(&(), ctx, vec![Message::user("hi")])
+        .await
+        .expect("the run finishes");
+    assert_eq!(run.text(), Some("recovered".to_string()));
+    let efforts: Vec<Option<ReasoningEffort>> = model
+        .requests()
+        .iter()
+        .map(|r| r.reasoning.as_ref().and_then(|c| c.effort))
+        .collect();
+    assert_eq!(
+        efforts,
+        vec![Some(ReasoningEffort::High), Some(ReasoningEffort::High)]
+    );
+}
+
+#[tokio::test]
+async fn the_nudge_after_a_dead_call_says_where_to_think_instead() {
+    // With retries spent, the nudge that re-prompts the model also says
+    // reasoning is off for the next call and that the working-out goes into
+    // the workspace.
+    let model = Arc::new(crate::testkit::ScriptedModel::new(vec![
+        truncated_empty_response(2048),
+        tool_call_response("c1", "fake", json!({})),
+        text_response("done", 4, 3),
+    ]));
+    let mut harness: AgentHarness<()> = AgentHarness::new();
+    harness
+        .register_model("mock", Arc::clone(&model) as _)
+        .register_tool(Arc::new(FakeTool::new("fake", "tool output")));
+    harness.with_policy(RunPolicy {
+        truncated_empty_retries: 0,
+        truncated_empty_nudges: 1,
+        ..RunPolicy::default()
+    });
+    let ctx = RunContext::new(
+        RunConfig::new("truncated-reasoning-nudge").with_max_turn_output_tokens(2048),
+        (),
+    );
+    let run = harness
+        .invoke_in_context(&(), ctx, vec![Message::user("hi")])
+        .await
+        .expect("the run finishes");
+    assert_eq!(run.text(), Some("done".to_string()));
+    let last_user = model.requests()[1]
+        .messages
+        .last()
+        .map(|m| m.text())
+        .unwrap_or_default();
+    assert!(
+        last_user.contains("Reasoning is switched off"),
+        "nudge should carry the reasoning-off note; got {last_user:?}"
+    );
+    assert!(
+        last_user.contains("scratch file"),
+        "and say where to think: {last_user:?}"
+    );
+}
+
+/// A middleware that notes a repeat on every tool result, standing in for
+/// the repeat-progress guard's warning.
+struct RepeatNoter;
+
+#[async_trait]
+impl Middleware<(), ()> for RepeatNoter {
+    fn name(&self) -> &str {
+        "repeat-noter"
+    }
+
+    async fn after_tool(
+        &self,
+        ctx: &mut RunContext<()>,
+        _state: &(),
+        _invocation: &ToolInvocationIdentity,
+        _result: &mut ToolResult,
+    ) -> Result<()> {
+        ctx.note_repeat();
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn a_repeat_note_hands_reasoning_back_before_the_hold_off_is_spent() {
+    // Two deaths hold reasoning off for two live calls. The retry runs
+    // without it and makes a tool call; a repeat noted on that call's result
+    // means the model is looping without reasoning, so the next call goes
+    // out at the configured effort although one hold-off call is left.
+    let model = Arc::new(crate::testkit::ScriptedModel::new(vec![
+        truncated_empty_response(2048),
+        truncated_empty_response(2048),
+        tool_call_response("c1", "fake", json!({})),
+        text_response("done", 4, 3),
+    ]));
+    let mut harness: AgentHarness<()> = AgentHarness::new();
+    harness
+        .register_model("mock", Arc::clone(&model) as _)
+        .register_tool(Arc::new(FakeTool::new("fake", "tool output")))
+        .push_middleware(Arc::new(RepeatNoter));
+    harness.with_policy(RunPolicy {
+        default_reasoning: Some(ReasoningConfig::effort(ReasoningEffort::High)),
+        ..RunPolicy::default()
+    });
+    let recorder = crate::testkit::EventRecorder::new();
+    let ctx = RunContext::new(
+        RunConfig::new("truncated-reasoning-restored").with_max_turn_output_tokens(2048),
+        (),
+    )
+    .with_events(recorder.sink());
+    let run = harness
+        .invoke_in_context(&(), ctx, vec![Message::user("hi")])
+        .await
+        .expect("the run finishes");
+    assert_eq!(run.text(), Some("done".to_string()));
+    let efforts: Vec<Option<ReasoningEffort>> = model
+        .requests()
+        .iter()
+        .map(|r| r.reasoning.as_ref().and_then(|c| c.effort))
+        .collect();
+    assert_eq!(
+        efforts,
+        vec![
+            Some(ReasoningEffort::High),
+            Some(ReasoningEffort::None),
+            Some(ReasoningEffort::None),
+            Some(ReasoningEffort::High),
+        ],
+        "the repeat note ends the hold-off early"
+    );
+    assert!(
+        recorder.events().iter().any(|e| matches!(
+            e,
+            AgentEvent::ControlApplied { control, .. } if control == "reasoning_restored"
+        )),
+        "the restore is observable; got kinds {:?}",
+        recorder.kinds()
+    );
+}
+
+/// A dead call that carries the reasoning it died in, as a provider's
+/// length-truncated streamed response does.
+fn truncated_empty_response_with_reasoning(reasoning: &str) -> ModelResponse {
+    let mut response = truncated_empty_response(2048);
+    response.message.content = vec![ContentBlock::Thinking {
+        text: reasoning.to_string(),
+        signature: None,
+    }];
+    response
+}
+
+#[tokio::test]
+async fn a_dead_calls_reasoning_is_carried_into_the_retry() {
+    // The derivation the call died in is handed back as the model's own
+    // interrupted notes, tail first, with the instruction to continue in
+    // code; the retry request carries it as its last message.
+    let reasoning = format!(
+        "{}\nSTATE OF PLAY: encoder mirrors the decoder's split\n",
+        "x".repeat(20_000)
+    );
+    let model = Arc::new(crate::testkit::ScriptedModel::new(vec![
+        truncated_empty_response_with_reasoning(&reasoning),
+        text_response("recovered", 4, 3),
+    ]));
+    let mut harness: AgentHarness<()> = AgentHarness::new();
+    harness.register_model("mock", Arc::clone(&model) as _);
+    let recorder = crate::testkit::EventRecorder::new();
+    let ctx = RunContext::new(
+        RunConfig::new("truncated-carry").with_max_turn_output_tokens(2048),
+        (),
+    )
+    .with_events(recorder.sink());
+    let run = harness
+        .invoke_in_context(&(), ctx, vec![Message::user("hi")])
+        .await
+        .expect("the run finishes");
+    assert_eq!(run.text(), Some("recovered".to_string()));
+    let retry = model.requests()[1].clone();
+    let last = retry.messages.last().map(|m| m.text()).unwrap_or_default();
+    assert!(
+        last.starts_with(super::run_loop::TRUNCATED_EMPTY_CARRY_PREFIX),
+        "the carry-over is the retry's last message: {last:.120}"
+    );
+    assert!(
+        last.contains("STATE OF PLAY"),
+        "the tail of the reasoning is kept"
+    );
+    assert!(last.contains("Continue from this point"));
+    assert!(
+        last.len() < 8_000 + 600,
+        "the excerpt is bounded by the policy: {} chars",
+        last.len()
+    );
+    assert!(
+        recorder.events().iter().any(|e| matches!(
+            e,
+            AgentEvent::ControlApplied { control, .. }
+                if control == "truncated_empty_reasoning_carried"
+        )),
+        "the carry is observable; got kinds {:?}",
+        recorder.kinds()
+    );
+}
+
+#[tokio::test]
+async fn the_carry_limit_counts_characters_not_utf8_bytes() {
+    // 9,000 CJK characters are 27,000 bytes. The policy's 8,000 is a
+    // character budget: the excerpt keeps about 8,000 characters (and the
+    // marker at the very end), not 8,000 bytes, which would be under 2,700
+    // characters.
+    let reasoning = format!("{}\nSTATE OF PLAY: 推导完成\n", "思".repeat(9_000));
+    let model = Arc::new(crate::testkit::ScriptedModel::new(vec![
+        truncated_empty_response_with_reasoning(&reasoning),
+        text_response("recovered", 4, 3),
+    ]));
+    let mut harness: AgentHarness<()> = AgentHarness::new();
+    harness.register_model("mock", Arc::clone(&model) as _);
+    let ctx = RunContext::new(
+        RunConfig::new("truncated-carry-chars").with_max_turn_output_tokens(2048),
+        (),
+    );
+    let run = harness
+        .invoke_in_context(&(), ctx, vec![Message::user("hi")])
+        .await
+        .expect("the run finishes");
+    assert_eq!(run.text(), Some("recovered".to_string()));
+    let retry = model.requests()[1].clone();
+    let last = retry.messages.last().map(|m| m.text()).unwrap_or_default();
+    assert!(last.contains("STATE OF PLAY: 推导完成"), "the tail is kept");
+    let kept = last.chars().filter(|c| *c == '思').count();
+    assert!(
+        (7_800..=8_000).contains(&kept),
+        "about 8,000 characters of reasoning are kept, not 8,000 bytes: {kept}"
+    );
+}
+
+#[tokio::test]
+async fn short_or_absent_reasoning_is_not_carried() {
+    let model = Arc::new(crate::testkit::ScriptedModel::new(vec![
+        truncated_empty_response_with_reasoning("hmm"),
+        text_response("recovered", 4, 3),
+    ]));
+    let mut harness: AgentHarness<()> = AgentHarness::new();
+    harness.register_model("mock", Arc::clone(&model) as _);
+    let ctx = RunContext::new(
+        RunConfig::new("truncated-no-carry").with_max_turn_output_tokens(2048),
+        (),
+    );
+    harness
+        .invoke_in_context(&(), ctx, vec![Message::user("hi")])
+        .await
+        .expect("the run finishes");
+    let retry = model.requests()[1].clone();
+    assert_eq!(
+        retry.messages.len(),
+        1,
+        "no carry-over message for three characters of reasoning"
+    );
+}
+
+#[tokio::test]
+async fn the_carry_over_can_be_switched_off() {
+    let model = Arc::new(crate::testkit::ScriptedModel::new(vec![
+        truncated_empty_response_with_reasoning(&"y".repeat(5_000)),
+        text_response("recovered", 4, 3),
+    ]));
+    let mut harness: AgentHarness<()> = AgentHarness::new();
+    harness.register_model("mock", Arc::clone(&model) as _);
+    harness.with_policy(RunPolicy {
+        truncated_empty_carry_reasoning_chars: 0,
+        ..RunPolicy::default()
+    });
+    let ctx = RunContext::new(
+        RunConfig::new("truncated-carry-off").with_max_turn_output_tokens(2048),
+        (),
+    );
+    harness
+        .invoke_in_context(&(), ctx, vec![Message::user("hi")])
+        .await
+        .expect("the run finishes");
+    assert_eq!(model.requests()[1].messages.len(), 1);
+}
+
+#[tokio::test]
+async fn the_nudge_after_spent_retries_carries_the_reasoning_too() {
+    // With no retry left, the nudged call still gets the interrupted
+    // working-out, ahead of the nudge itself.
+    let model = Arc::new(crate::testkit::ScriptedModel::new(vec![
+        truncated_empty_response_with_reasoning(&"z".repeat(1_000)),
+        text_response("recovered", 4, 3),
+    ]));
+    let mut harness: AgentHarness<()> = AgentHarness::new();
+    harness.register_model("mock", Arc::clone(&model) as _);
+    harness.with_policy(RunPolicy {
+        truncated_empty_retries: 0,
+        truncated_empty_nudges: 1,
+        ..RunPolicy::default()
+    });
+    let ctx = RunContext::new(
+        RunConfig::new("truncated-carry-nudge").with_max_turn_output_tokens(2048),
+        (),
+    );
+    harness
+        .invoke_in_context(&(), ctx, vec![Message::user("hi")])
+        .await
+        .expect("the run finishes");
+    let messages = model.requests()[1].messages.clone();
+    assert_eq!(messages.len(), 3, "the seed, the carry, then the nudge");
+    assert!(messages[1].text().contains("Continue from this point"));
+    assert!(messages[2].text().contains("ran out of output tokens"));
 }

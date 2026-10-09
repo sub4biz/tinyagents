@@ -351,6 +351,63 @@ pub struct RunPolicy {
     /// Defaults to `1`. Set to `0` (together with `truncated_empty_retries =
     /// 0`) for exact-replay callers that must not re-issue a call.
     pub truncated_empty_nudges: u32,
+    /// After a truncated-empty completion, send the retry or nudged call with
+    /// reasoning switched off (`reasoning.effort = none`).
+    ///
+    /// On the hosted providers measured (deepseek-v4.1-flash through
+    /// OpenRouter's routable backends) neither a smaller output cap nor a
+    /// lower effort label stops a model that deliberates past its cap: one
+    /// task died nine times in a row at caps from 65k down to 2k, and at
+    /// `medium` effort 11 of 25 calls still died. `effort = none` was the one
+    /// control that produced zero reasoning tokens. So the step is re-issued
+    /// without reasoning, and the model has to act from what it already
+    /// knows; the nudge tells it to do its working-out in the workspace. The
+    /// hold-off backs off (1, 2, 4, 8, 16 live calls without reasoning) and
+    /// reasoning always comes back: kept off for good, a model spent the rest
+    /// of a run writing probe programs instead of the deliverable.
+    ///
+    /// Defaults to `true`. A caller that must keep every call at the
+    /// configured effort sets it to `false`.
+    pub truncated_empty_reasoning_fallback: bool,
+    /// Client-side bound on hidden reasoning in a streamed call.
+    ///
+    /// A request's `reasoning.budget_tokens` is a promise the provider may
+    /// not keep: measured on deepseek-v4.1-flash through OpenRouter's
+    /// routable providers, a 1,500-token budget returned 4,206 reasoning
+    /// tokens from one and 5,964 from another, and a 9,000-token budget
+    /// under a tool-heavy transcript returned 21,528. A call that reasons
+    /// past its budget with nothing visible yet is, in every case measured,
+    /// one that reasons to the output cap and returns nothing: 50 seconds at
+    /// a 16k cap, 150 at 65k. The watchdog ends such a call at the budget
+    /// instead, dropping the stream, and hands the loop the same
+    /// `finish_reason = length`, no-content response the cap would have
+    /// produced, so the truncated-empty recovery (retry, reasoning off,
+    /// nudge) runs after a fraction of the wait.
+    ///
+    /// Reasoning length is estimated from the streamed reasoning text at
+    /// three characters per token (measured: 36k characters of
+    /// deepseek-v4.1-flash reasoning were about 13k tokens), which
+    /// under-counts, so the bound fires late rather than early. Visible text or a tool-call fragment before the
+    /// bound disarms it: the model is answering. Unary (non-streamed) calls
+    /// are not bounded.
+    ///
+    /// Defaults to [`ReasoningWatchdog::RequestBudget`]: enforce the budget the
+    /// request carries, do nothing for a request without one.
+    pub reasoning_watchdog: ReasoningWatchdog,
+    /// How much of a dead call's interrupted reasoning (its last characters)
+    /// is carried into the transcript, as a user message, ahead of the retry
+    /// or nudged call that follows it. `0` carries nothing.
+    ///
+    /// The reasoning a call dies in is usually real work: read back, one
+    /// dead call on a compression task was a correct derivation of the
+    /// decoder's arithmetic coder, cut off at the cap, and every retry began
+    /// the same derivation again from nothing. Carrying the tail of it, with
+    /// a note to continue from there in code rather than re-derive, makes the
+    /// deaths cumulative instead of wasted. The tail is kept because a
+    /// derivation's state of play is at its end.
+    ///
+    /// Defaults to 8,000 characters, about 2,500 tokens per death.
+    pub truncated_empty_carry_reasoning_chars: usize,
     /// Automatic retries for a completion with no visible text, tool calls, or
     /// structured output when the provider did not report length truncation.
     /// Reasoning-only `stop` responses are one example: the model spent tokens
@@ -663,6 +720,12 @@ impl Default for RunPolicy {
             // keeps deliberating; one plain "stop and act" re-prompt recovers
             // the step instead of ending the run on a blank reply.
             truncated_empty_nudges: 1,
+            // A dead call at any cap or effort is evidence that this
+            // transcript does not get past the model's reasoning; the next
+            // call goes out without it.
+            truncated_empty_reasoning_fallback: true,
+            reasoning_watchdog: ReasoningWatchdog::RequestBudget,
+            truncated_empty_carry_reasoning_chars: 8_000,
             empty_response_retries: 0,
             reject_truncated_tool_calls: true,
             truncated_tool_call_retries: 2,
@@ -783,5 +846,31 @@ impl<State: Send + Sync, Ctx: Send + Sync> InvocationRuntime<State, Ctx> {
 
     pub(crate) fn harness(&self) -> &AgentHarness<State, Ctx> {
         &self.harness
+    }
+}
+
+/// How [`RunPolicy::reasoning_watchdog`] bounds hidden reasoning in a
+/// streamed call.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ReasoningWatchdog {
+    /// No client-side bound.
+    Off,
+    /// Enforce the request's own `reasoning.budget_tokens`; a request
+    /// without one is unbounded.
+    #[default]
+    RequestBudget,
+    /// Enforce this many reasoning tokens on every streamed call, whatever
+    /// the request carries.
+    Tokens(u32),
+}
+
+impl ReasoningWatchdog {
+    /// The reasoning-token bound for `request`, if any.
+    pub fn bound_for(self, request: &tinyinference_llm::model::ModelRequest) -> Option<u32> {
+        match self {
+            Self::Off => None,
+            Self::RequestBudget => request.reasoning.as_ref().and_then(|r| r.budget_tokens),
+            Self::Tokens(tokens) => Some(tokens),
+        }
     }
 }

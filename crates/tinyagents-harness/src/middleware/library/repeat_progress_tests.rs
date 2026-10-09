@@ -337,3 +337,38 @@ async fn distinct_hex_only_results_do_not_halt_on_recurrence() {
         "three different commit ids are three different results"
     );
 }
+
+#[tokio::test]
+async fn a_repeat_warning_is_noted_on_the_run_context() {
+    // The staged guard warns on a result before it blocks or halts; the
+    // warning is also flagged on the run context so the agent loop can hand
+    // reasoning back to a model that repeats itself without it.
+    let handle = SteeringHandle::allow_all();
+    let summary = Arc::new(std::sync::Mutex::new(None));
+    let mw = RepeatProgressMiddleware::new(handle, summary, exempt());
+    let mut ctx = ctx();
+    assert!(!ctx.take_repeat_noted(), "nothing noted before any call");
+    let mut noted_at = None;
+    for cycle in 1..=6 {
+        let mut response = repeated_success_response("use_skill", json!({"skill": "skills"}));
+        mw.after_model(&mut ctx, &(), &mut response).await.unwrap();
+        let mut result = TaToolResult::success("doc");
+        let invocation = ToolInvocationIdentity::new("repeat-1", "use_skill");
+        mw.after_tool(&mut ctx, &(), &invocation, &mut result)
+            .await
+            .unwrap();
+        if ctx.take_repeat_noted() {
+            assert!(
+                result.output().contains("identical result"),
+                "the flag is set on the result that carries the note: {}",
+                result.output()
+            );
+            noted_at = Some(cycle);
+            break;
+        }
+    }
+    assert!(
+        noted_at.is_some_and(|cycle| cycle > 1),
+        "a repeat warning sets the flag once the repeat is noted: {noted_at:?}"
+    );
+}

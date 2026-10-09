@@ -432,6 +432,10 @@ impl<C: Send + Sync> Middleware<(), C> for RepeatProgressMiddleware {
                     "[tinyagents::mw] repeat-progress appended a warning to the tool result"
                 );
                 append_note(result, &note);
+                // The loop's reasoning fallback reads this before the next
+                // call: a model repeating itself without reasoning gets
+                // reasoning back.
+                ctx.note_repeat();
             }
         }
         if already_halted {
