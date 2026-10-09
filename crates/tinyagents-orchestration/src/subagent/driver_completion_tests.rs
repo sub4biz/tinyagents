@@ -10,7 +10,7 @@ use tinyagents_harness::context::{RunConfig, RunContext};
 use tinyagents_harness::run_queue::{QueueLane, RunQueue, RunQueueHandle};
 use tinyagents_runtime::ToolSnapshot;
 use tinyagents_tasks::{
-    CompletionRouter, CompletionState, CompletionStatus, InMemoryCompletionStore, NotifyMode,
+    CompletionRouter, CompletionStatus, InMemoryCompletionStore, NotifyMode,
 };
 use tinyinference_llm::message::Message;
 
@@ -266,8 +266,7 @@ async fn a_replayed_terminal_result_is_not_recorded_again() {
         .run(request("t1"), CancellationToken::new())
         .await
         .unwrap();
-    router.claim_pending("p", 1).unwrap();
-    router.pull("p", 1).unwrap();
+    assert_eq!(router.pull("p", 10).unwrap().len(), 1);
     router.mark_delivered(&["t1"]).unwrap();
     let replay = driver
         .run(request("t1"), CancellationToken::new())
@@ -275,12 +274,7 @@ async fn a_replayed_terminal_result_is_not_recorded_again() {
         .unwrap();
     assert!(!replay.should_emit_host_effects());
     assert!(router.pending_for("p").is_empty());
-    let kinds: Vec<_> = router
-        .pending_for("p")
-        .into_iter()
-        .map(|r| r.state)
-        .collect();
-    assert!(!kinds.contains(&CompletionState::Pending));
+    assert!(router.pull("p", 10).unwrap().is_empty());
 }
 
 #[tokio::test]
