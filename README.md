@@ -34,6 +34,10 @@ TinyAgents is a Cargo workspace, not one crate. Depend on the pieces you need:
   `START`/`END`, nodes, conditional edges, `Send` fanout, reducers/channels,
   checkpoints, interrupts, subgraphs, and time travel. Features: `sqlite`,
   `tracing`.
+- **`tinyagents-tasks`** — graph-independent detached-task machinery: task
+  model, `TaskStore` (in-memory and JSONL), `DetachedTaskRegistry`, restart
+  reconciliation, and the `spawn`/`await`/`cancel`/`steer` orchestration tools.
+  Re-exported from `tinyagents-graph::orchestration` for compatibility.
 - **`tinyagents-registry`** — a named capability catalog (models, tools,
   agents, graphs, and routers), plus an offline model price/capability catalog.
 - **`tinyagents-session`** — a SQLite-backed store for session history,
