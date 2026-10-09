@@ -99,8 +99,9 @@
 use super::model_call::ToolCallBase;
 use super::*;
 use crate::tool::{
-    DeferredToolRequests, LedgerFailure, ToolDispatch, ToolEffectSettle, ToolEffectStart,
-    ToolEffectStatus, ToolProgressGate, ToolProgressLimits, provider_schema,
+    CallGate, DeferredToolRequests, LedgerFailure, ToolDispatch, ToolEffectSettle,
+    ToolEffectStart, ToolEffectStatus, ToolGate, ToolProgressGate, ToolProgressLimits,
+    provider_schema,
 };
 use sha2::{Digest, Sha256};
 use tinyinference_llm::message::ContentBlock;
