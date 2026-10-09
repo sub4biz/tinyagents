@@ -27,8 +27,4 @@ pub use types::{
 pub use validate::{validate_agents, validate_structure};
 
 #[cfg(test)]
-mod tests;
-
-#[cfg(test)]
-#[path = "child_step_tests.rs"]
-mod child_step_tests;
+pub(crate) mod tests;

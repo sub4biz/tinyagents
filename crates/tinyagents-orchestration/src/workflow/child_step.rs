@@ -127,3 +127,7 @@ pub(super) async fn run_child_step<E: WorkflowExecutor + 'static>(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "child_step_tests.rs"]
+mod tests;

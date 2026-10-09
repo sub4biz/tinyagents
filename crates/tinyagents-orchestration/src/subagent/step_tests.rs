@@ -1,12 +1,13 @@
 //! `run_agent_step`: opaque host work goes through the real `SubagentDriver`.
 
+use super::*;
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use tinyagents_harness::retry::RetryPolicy;
 
-use super::*;
 use crate::subagent::{IncompleteKind, SpawnPolicy};
 
 fn ident(task: &str) -> AgentStepIdentity {
@@ -41,8 +42,7 @@ async fn result_policy_cap_trims_output() {
     })
     .await
     .unwrap();
-    assert!(result.outcome.output.chars().count() < 20);
-    assert_ne!(result.outcome.output, "0123456789abcdefghij");
+    assert!(result.outcome.output.chars().count() <= 5);
 }
 
 #[tokio::test]

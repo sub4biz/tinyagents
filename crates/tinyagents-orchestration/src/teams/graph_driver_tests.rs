@@ -1,10 +1,11 @@
 //! Member steps run through `SubagentDriver`: configured driver policy takes
 //! effect, and the default step is behaviour-neutral.
 
+use super::*;
+
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use super::*;
 use crate::subagent::{ResultPolicy, SpawnAdmission, SpawnPolicy, SubAgentPolicy};
 
 #[derive(Default, Clone)]

@@ -285,11 +285,13 @@ where
     }
 
     /// Apply driver policy to every agent child: spawn admission (scoped per
-    /// workflow run), timeout/retry/budget, result policy and role.
+    /// workflow run, targeted at the agent id), timeout and result policy.
+    /// Retry, token budget and role have no effect here: the executor reports
+    /// no transient failures, usage or tools.
     ///
     /// Without this call the config is inert and children run exactly as
-    /// before. A child refused by the spawn policy, timed out, or over budget
-    /// fails its phase with that reason.
+    /// before. A child refused by the spawn policy or timed out fails its
+    /// phase with that reason.
     pub fn with_step_config(mut self, config: AgentStepConfig) -> Self {
         self.step_config = config;
         self

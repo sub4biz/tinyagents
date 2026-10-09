@@ -1,15 +1,17 @@
 //! Workflow agent children run through `SubagentDriver`: configured driver
 //! policy takes effect on a workflow phase.
 
+use super::*;
+
 use std::sync::Arc;
 
 use serde_json::json;
 use tinyagents_harness::CancellationToken;
 use tinyagents_session::run_ledger::WorkflowRunStatus;
 
-use super::tests::{FakeExecutor, MemoryStore, definition};
-use super::*;
-use crate::subagent::{AgentStepConfig, ResultPolicy, SpawnAdmission, SpawnPolicy};
+use crate::subagent::{ResultPolicy, SpawnAdmission, SpawnPolicy};
+use crate::workflow::tests::{FakeExecutor, MemoryStore, definition};
+use crate::workflow::WorkflowEngine;
 
 fn run_with(
     config: AgentStepConfig,
@@ -95,7 +97,7 @@ async fn default_step_config_leaves_the_output_untouched() {
 async fn timed_out_child_is_cancelled_by_its_registered_id() {
     use std::time::Duration;
 
-    use super::tests::BlockingExecutor;
+    use crate::workflow::tests::BlockingExecutor;
     use crate::subagent::SubAgentPolicy;
 
     let store = Arc::new(MemoryStore::default());
