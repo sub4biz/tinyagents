@@ -561,11 +561,7 @@ where
     let entry_len = loop_state.messages.len();
     // The turn that issued these calls began at (or before) the assistant
     // message; a fresh runtime resuming an interrupted batch has no open turn.
-    phases::lifecycle_resume(
-        ctx,
-        loop_state.turn,
-        Some(entry_len.saturating_sub(1)),
-    );
+    phases::lifecycle_resume(ctx, loop_state.turn, Some(entry_len.saturating_sub(1)));
     let calls = std::mem::take(&mut loop_state.pending_tool_calls);
     let outcome = phases::execute_tool_batch(
         harness,
@@ -619,8 +615,14 @@ where
         let result = apply_control(ctx, &mut loop_state, control, node::TOOLS, node::PLAN);
         // The tool turn stays open on an interrupt: the re-run closes it with the
         // results it produces (a fresh runtime re-opens it via `lifecycle_resume`).
-        if !retract_on_interrupt(harness, ctx, &result, &loop_state.messages, entry_len, false)
-        {
+        if !retract_on_interrupt(
+            harness,
+            ctx,
+            &result,
+            &loop_state.messages,
+            entry_len,
+            false,
+        ) {
             // Every tool result of this batch is on the transcript: announce
             // them and close the turn, as the direct loop does after its batch.
             phases::lifecycle_close_turn(harness, ctx, &loop_state.messages);
@@ -662,6 +664,7 @@ fn retract_on_interrupt<State: Send + Sync, Ctx: Send + Sync>(
     // leaves its turn open for the re-run to close with the real results.
     if close_turn {
         phases::lifecycle_close_turn(harness, ctx, &messages[..entry_len.min(messages.len())]);
+    }
     true
 }
 

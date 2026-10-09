@@ -46,7 +46,11 @@ come from direct-loop recovery paths the graph rendition does not implement. The
 step-by-step `LoopIter` and `compile_loop` graph announce the same events and
 treat the transcript present at their first node activation (any node) as the seed. A node that
 interrupts discards its state and re-runs on resume, so the appends it announced
-are retracted with `MessageRetracted` first.
+are retracted with `MessageRetracted` first. A model node's turn is closed on an
+interrupt; a tools node leaves its turn open, and the re-run closes it with the
+real results. A fresh runtime resuming from a checkpoint continues the turn
+numbering from the checkpoint and re-opens the in-flight tool turn (without a
+second `TurnStarted`).
 
 Known differences from the direct loop: the graph rendition closes a turn before
 an output-retry prompt is announced (the direct loop announces the prompt first),
