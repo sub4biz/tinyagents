@@ -8,6 +8,16 @@
 /// color metadata) remain byte-for-byte unchanged. The input is never modified.
 /// Work is bounded to 32 MiB of input and 16 million pixels; hosts may enforce
 /// tighter upload limits. This helper neither decodes nor changes other formats.
+///
+/// Requires the `png-optimize` feature. Without it this always returns `None`
+/// ("no saving"), so callers keep the original bytes and any size limit they
+/// apply to the original is enforced exactly as when optimization fails.
+#[cfg(not(feature = "png-optimize"))]
+pub fn optimize_png_lossless(_bytes: &[u8]) -> Option<Vec<u8>> {
+    None
+}
+
+#[cfg(feature = "png-optimize")]
 pub fn optimize_png_lossless(bytes: &[u8]) -> Option<Vec<u8>> {
     if bytes.len() > 32 * 1024 * 1024 || bytes.get(..8)? != b"\x89PNG\r\n\x1a\n" {
         return None;
@@ -40,6 +50,7 @@ pub fn optimize_png_lossless(bytes: &[u8]) -> Option<Vec<u8>> {
     Some(optimized)
 }
 
+#[cfg(feature = "png-optimize")]
 // Even if an optimizer starts rewriting a metadata chunk in a future release,
 // the derivative is admitted only when every non-IDAT chunk stays identical.
 fn unchanged_chunks(bytes: &[u8]) -> Option<Vec<&[u8]>> {
