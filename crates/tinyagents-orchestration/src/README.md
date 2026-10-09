@@ -11,7 +11,8 @@ on orchestration policy.
 - `subagent::SubAgentTool` starts a child asynchronously through typed
   parent-context tool dispatch and immediately returns a stable job id.
 - `subagent::SubAgentJobRegistry` records queued, running, completed, failed,
-  and cancelled jobs. `SubAgentJobsTool` queries them and
+  and cancelled jobs on top of `tinyagents_tasks::DetachedTaskRegistry`.
+  `SubAgentJobsTool` queries them and
   `SubAgentMessageTool` sends messages to live children.
 - `subagent::SubAgentSession` reuses one child and its transcript across turns.
 - `subagent::SpawnPolicy` / `SpawnAdmission` bound child fan-out (per-parent
