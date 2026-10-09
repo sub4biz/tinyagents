@@ -70,18 +70,13 @@ scrub) lives in `tinytools-agent`, reached through
   content each) and skipped when the run has no middleware. A `ToolDispatch`
   must build its `ToolExecutionContext` inside `execute`'s future.
 
-### Injected arguments (`injected.rs`)
+### Injected arguments
 
-- `strip_injected_arguments` — removes host-only keys from model-supplied
-  arguments before validation, logging any that were actually present (a
-  forgery attempt).
-- `project_injected_arguments` — removes injected keys from a schema's
-  `properties` **and** `required` so a model is never told to supply an
-  argument it cannot see.
-
-The security-critical ordering (strip → validate → inject → invoke) is
-documented on the module and enforced by the agent loop's tool-execution
-path, not by this module itself.
+Strip, projection and host-value injection live in `tinytools`
+(`prepare_tool_arguments`, `project_injected_arguments`); the registry applies
+the projection to the schemas it sends to the model. The security-critical
+ordering (strip → validate → inject → invoke) is enforced by the agent loop's
+tool-execution path.
 
 ### Schema cleaning (`schema.rs`)
 
@@ -142,20 +137,19 @@ the model. Re-exported here as `pub mod select` and via `pub use select::*`.
 | --- | --- |
 | `mod.rs` | `ToolRegistry`, `ToolDispatch`, `provider_schema`; wires the submodules together. |
 | `types.rs` | `ToolExecutionContext` (tests in `context_tests.rs`). |
-| `injected.rs` | Injected (host-only) argument stripping and schema projection. |
 | `schema.rs` | `SchemaCleanr`, `CleaningStrategy`; low-level JSON Schema cleaning. |
 | `schema_prepare.rs` | Provider projection seam built on `schema.rs`; strict-mode sanitizer. |
 | `schema_walk.rs` | Vendor-neutral schema/value walkers: primary array path, response fields, missing and unsupported argument names. |
 | `shared/` | `CanonicalSharedToolAdapter` (a `tinytools::Tool` over shared, non-cloneable registries) and `EarlyExitHook` (pause the run when a designated tool succeeds). |
 | `timeout.rs` | `ToolTimeoutSettings`, `ResolvedToolTimeout`. |
 | `select/` | Prompt-driven tool ranking (own submodule; see its README/module doc). |
-| `*_tests.rs` | Unit tests colocated by concern, wired in with `#[path = "..."]`. (`injected_test.rs` and `test.rs` are also in this directory but no module declares them, so they are not compiled.) |
+| `*_tests.rs` | Unit tests colocated by concern, wired in with `#[path = "..."]`. |
 
 ## Operational constraints
 
 - **Injected-argument ordering is security-critical.** Strip must run before
   validation, which must run before injection, which must run before
-  invocation — see `injected.rs`'s module doc for why the order cannot be
+  invocation — see `tinytools::prepare_tool_arguments` for why the order cannot be
   relaxed.
 - **Schema cleaning must run before strict-mode sanitization**
   (`prepare_parameters`), so `required` is computed from the resolved
