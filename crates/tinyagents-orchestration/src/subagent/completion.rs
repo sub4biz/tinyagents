@@ -91,7 +91,7 @@ impl CompletionOrigin {
         // A cancellation is the parent's own doing: a mapping exists, but it is
         // routing policy not to record it. A pause is not final (and has no
         // completion status).
-        if matches!(outcome.status, SubagentOutcomeKind::Cancelled) {
+        if matches!(&outcome.status, SubagentOutcomeKind::Cancelled) {
             return None;
         }
         let status = CompletionStatus::try_from(&outcome.status).ok()?;

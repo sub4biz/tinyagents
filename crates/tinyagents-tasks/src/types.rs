@@ -100,6 +100,46 @@ impl OrchestrationTaskStatus {
     }
 }
 
+/// A status has no counterpart in the target vocabulary.
+///
+/// Returned by the fallible (`TryFrom`) conversions, never for a status that
+/// has a lossy-but-sensible mapping.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NoEquivalentStatus {
+    from: &'static str,
+    target: &'static str,
+}
+
+impl NoEquivalentStatus {
+    /// Builds the error for a status labelled `from` that has no equivalent in
+    /// the vocabulary named `target`.
+    pub fn new(from: &'static str, target: &'static str) -> Self {
+        Self { from, target }
+    }
+
+    /// Wire label of the status that could not be converted.
+    pub fn from_status(&self) -> &'static str {
+        self.from
+    }
+
+    /// Name of the vocabulary that has no equivalent.
+    pub fn target(&self) -> &'static str {
+        self.target
+    }
+}
+
+impl fmt::Display for NoEquivalentStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "status `{}` has no equivalent in {}",
+            self.from, self.target
+        )
+    }
+}
+
+impl std::error::Error for NoEquivalentStatus {}
+
 /// A request to create a managed orchestration task.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct OrchestrationTaskSpec {

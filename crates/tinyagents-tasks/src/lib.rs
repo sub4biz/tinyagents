@@ -39,7 +39,6 @@ pub use recovery::{
     build_restart_recovery_note, recovery_children,
 };
 pub use runtime::DetachedTaskRegistry;
-pub use status::NoEquivalentStatus;
 pub use store::{InMemoryTaskStore, JsonlTaskStore, TaskStore};
 pub use store_registry::{
     TaskStoreRegistry, TaskStoreRegistryError, open_jsonl_task_store_or_memory,

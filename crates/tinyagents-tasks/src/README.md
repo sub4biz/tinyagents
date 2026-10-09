@@ -219,8 +219,8 @@ README.
 | File | Role |
 | --- | --- |
 | `lib.rs` | Module declarations and re-exports. |
-| `status.rs` | `NoEquivalentStatus` and the `CompletionStatus` <-> `OrchestrationTaskStatus` conversions. |
-| `types.rs` | Task kind/status/spec/result/record/filter types, `OrchestrationToolKind`, `OrchestrationControlOutcome`, and the `DetachedTaskRegistry` snapshot/error types. |
+| `status.rs` | The `CompletionStatus` <-> `OrchestrationTaskStatus` conversions. |
+| `types.rs` | `NoEquivalentStatus`, task kind/status/spec/result/record/filter types, `OrchestrationToolKind`, `OrchestrationControlOutcome`, and the `DetachedTaskRegistry` snapshot/error types. |
 | `tool.rs` | `OrchestrationTool`, `SteeringRegistry`, tool constructors and schemas. |
 | `store.rs` | `TaskStore` trait, `InMemoryTaskStore`, `JsonlTaskStore`. |
 | `store_registry.rs` | `TaskStoreRegistry<K>`, `open_jsonl_task_store_or_memory`. |
