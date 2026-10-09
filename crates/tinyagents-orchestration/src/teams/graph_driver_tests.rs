@@ -192,16 +192,23 @@ async fn cancelling_while_the_worker_runs_routes_to_on_failed() {
     let step = MemberStep::default().with_cancellation(token.clone());
     let f = seen.failed.clone();
     let cancel = token.clone();
+    let started = Arc::new(tokio::sync::Notify::new());
+    let signal = started.clone();
     tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(30)).await;
+        // Cancel only once the worker has actually started.
+        started.notified().await;
         cancel.cancel();
     });
     run_member_graph_with(
         None,
         step,
-        || async {
-            std::future::pending::<()>().await;
-            Ok(done("never"))
+        move || {
+            let signal = signal.clone();
+            async move {
+                signal.notify_one();
+                std::future::pending::<()>().await;
+                Ok(done("never"))
+            }
         },
         |_| async { Ok(()) },
         move |r| {
