@@ -9,7 +9,7 @@ use tinyagents_session::run_ledger::WorkflowRunStatus;
 
 use super::tests::{FakeExecutor, MemoryStore, definition};
 use super::*;
-use crate::subagent::{ResultPolicy, SpawnAdmission, SpawnPolicy};
+use crate::subagent::{AgentStepConfig, ResultPolicy, SpawnAdmission, SpawnPolicy};
 
 fn run_with(
     config: AgentStepConfig,

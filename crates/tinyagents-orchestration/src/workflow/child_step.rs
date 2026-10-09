@@ -13,8 +13,7 @@ use super::engine::{
     WorkflowExecutor, render_compat_output,
 };
 use crate::subagent::{
-    AgentStepConfig, AgentStepError, AgentStepIdentity, StepSuccess, SubagentOutcomeKind,
-    run_agent_step,
+    AgentStepConfig, AgentStepIdentity, StepSuccess, SubagentOutcomeKind, run_agent_step,
 };
 
 const LOG_PREFIX: &str = "[workflow-child-step]";
