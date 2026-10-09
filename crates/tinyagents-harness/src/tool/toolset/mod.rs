@@ -392,7 +392,7 @@ impl Tool for OverrideTool {
         self.inner.tags()
     }
 
-    fn indirect_target(&self, args: &Value) -> Option<tinytools::ToolSubject> {
+    fn indirect_target(&self, args: &Value) -> Option<tinytools::IndirectCall> {
         self.inner.indirect_target(args)
     }
 

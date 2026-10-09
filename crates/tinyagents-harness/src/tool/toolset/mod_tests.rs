@@ -144,8 +144,10 @@ impl Tool for TaggedDispatcher {
     fn tags(&self) -> Vec<String> {
         vec!["composio.scope:write".into()]
     }
-    fn indirect_target(&self, args: &Value) -> Option<tinytools::ToolSubject> {
-        args["action"].as_str().map(tinytools::ToolSubject::named)
+    fn indirect_target(&self, args: &Value) -> Option<tinytools::IndirectCall> {
+        args["action"]
+            .as_str()
+            .map(|name| tinytools::ToolSubject::named(name).into())
     }
     async fn execute(&self, _args: Value) -> anyhow::Result<ToolResult> {
         Ok(ToolResult::success("ok"))
@@ -161,6 +163,6 @@ fn an_override_keeps_what_tool_rules_read() {
     assert_eq!(tool.tags(), ["composio.scope:write"]);
     assert_eq!(
         tool.indirect_target(&serde_json::json!({ "action": "GMAIL_DELETE_EMAIL" })),
-        Some(tinytools::ToolSubject::named("GMAIL_DELETE_EMAIL"))
+        Some(tinytools::ToolSubject::named("GMAIL_DELETE_EMAIL").into())
     );
 }

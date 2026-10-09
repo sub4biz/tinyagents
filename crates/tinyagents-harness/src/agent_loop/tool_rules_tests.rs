@@ -92,11 +92,13 @@ impl Tool for RuleTool {
     fn policy(&self) -> ToolPolicy {
         self.policy.clone()
     }
-    fn indirect_target(&self, args: &Value) -> Option<ToolSubject> {
+    fn indirect_target(&self, args: &Value) -> Option<tinytools::IndirectCall> {
         if !self.dispatches {
             return None;
         }
-        args.get("action")?.as_str().map(ToolSubject::named)
+        args.get("action")?
+            .as_str()
+            .map(|name| ToolSubject::named(name).into())
     }
     async fn execute(&self, arguments: Value) -> anyhow::Result<ToolResult> {
         self.seen.lock().unwrap().push(arguments);

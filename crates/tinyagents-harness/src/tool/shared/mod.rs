@@ -119,7 +119,7 @@ impl Tool for CanonicalSharedToolAdapter {
         self.resolved_tool().map(Tool::tags).unwrap_or_default()
     }
 
-    fn indirect_target(&self, args: &serde_json::Value) -> Option<tinytools::ToolSubject> {
+    fn indirect_target(&self, args: &serde_json::Value) -> Option<tinytools::IndirectCall> {
         self.resolved_tool()
             .and_then(|tool| tool.indirect_target(args))
     }

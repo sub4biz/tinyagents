@@ -245,8 +245,10 @@ impl Tool for BehaviorTool {
         vec!["pack:behaviors".into()]
     }
 
-    fn indirect_target(&self, args: &serde_json::Value) -> Option<tinytools::ToolSubject> {
-        args["action"].as_str().map(tinytools::ToolSubject::named)
+    fn indirect_target(&self, args: &serde_json::Value) -> Option<tinytools::IndirectCall> {
+        args["action"]
+            .as_str()
+            .map(|name| tinytools::ToolSubject::named(name).into())
     }
 
     async fn execute(&self, _args: serde_json::Value) -> anyhow::Result<ToolResult> {
@@ -278,7 +280,7 @@ fn canonical_adapter_forwards_tool_rule_metadata() {
     assert_eq!(adapter.tags(), ["pack:behaviors"]);
     assert_eq!(
         adapter.indirect_target(&serde_json::json!({ "action": "GMAIL_DELETE_EMAIL" })),
-        Some(tinytools::ToolSubject::named("GMAIL_DELETE_EMAIL"))
+        Some(tinytools::ToolSubject::named("GMAIL_DELETE_EMAIL").into())
     );
 }
 
