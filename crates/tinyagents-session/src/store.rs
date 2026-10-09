@@ -117,7 +117,8 @@ fn cached_connection(db_path: &Path) -> Result<SqliteNative> {
     Ok(native)
 }
 
-fn driver_error(error: tinystoragedrivers_sqlite::tinystoragedrivers_core::StorageError) -> TinyAgentsError {
+/// A failure of the driver itself (its connection lock), as a storage error.
+fn driver_error(error: impl std::fmt::Display) -> TinyAgentsError {
     TinyAgentsError::Storage(format!("session DB: {error}"))
 }
 
