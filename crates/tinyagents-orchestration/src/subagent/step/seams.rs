@@ -77,6 +77,9 @@ impl<T: Send + 'static> SubagentExecutor<()> for StepExecutor<T> {
         execution: SubagentExecution<()>,
     ) -> Result<SubagentOutcome, SubagentError> {
         let task_id = execution.prepared.task_id.clone();
+        if execution.cancellation.is_cancelled() {
+            return Err(SubagentError::Cancelled);
+        }
         let result = (self.work)(StepContext {
             cancellation: execution.cancellation.clone(),
             role: execution.prepared.role,
@@ -88,6 +91,7 @@ impl<T: Send + 'static> SubagentExecutor<()> for StepExecutor<T> {
         match result {
             Ok(success) => {
                 slot.value = Some(success.value);
+                slot.error = None;
                 let mut outcome = match success.incomplete_reason {
                     Some(reason) => {
                         SubagentOutcome::incomplete(task_id, SubagentIncomplete::new(reason))

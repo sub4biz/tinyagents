@@ -144,7 +144,9 @@ where
                     biased;
                     outcome = fut => outcome?,
                     _ = ctx.cancellation.cancelled() => {
-                        return Err(anyhow::anyhow!("member step was cancelled").into());
+                        // A typed incomplete result, never a worker error:
+                        // the member is routed to `on_failed`.
+                        return Ok(StepSuccess::incomplete("member step was cancelled", ()));
                     }
                 };
                 Ok(match outcome {
@@ -181,7 +183,7 @@ where
             },
             SubagentOutcomeKind::Cancelled | SubagentOutcomeKind::AwaitingInput(_) => {
                 MemberOutcome::Failed {
-                    reason: "member step did not complete".to_owned(),
+                    reason: "member step was cancelled".to_owned(),
                 }
             }
         }),
