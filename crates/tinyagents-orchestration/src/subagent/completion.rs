@@ -12,8 +12,8 @@ use tinyagents_tasks::{
 };
 
 use super::{
-    AppliedResult, ArtifactReference, PreparedSubagent, SubagentError, SubagentOutcome,
-    SubagentOutcomeKind, SubagentTaskKey,
+    AppliedResult, ArtifactReference, PreparedSubagent, SubagentOutcome, SubagentOutcomeKind,
+    SubagentTaskKey,
 };
 
 const LOG_PREFIX: &str = "[subagent-completion]";
