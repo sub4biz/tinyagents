@@ -9,6 +9,7 @@ pub mod discover;
 pub mod effects;
 pub mod nested;
 pub mod packs;
+mod rules;
 mod progress;
 mod prompt;
 mod schema;
@@ -34,6 +35,8 @@ pub use effects::{
     ToolEffectStatus,
 };
 pub use nested::NestedToolRunner;
+pub(crate) use rules::{CallGate, ToolGate};
+pub use rules::ToolRulePolicy;
 pub(crate) use progress::{ToolProgressGate, ToolProgressLimits};
 pub use prompt::*;
 pub use schema::*;

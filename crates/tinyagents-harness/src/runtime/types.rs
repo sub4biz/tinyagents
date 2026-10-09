@@ -59,6 +59,9 @@ pub(crate) struct HostInvocationBinding<State: Send + Sync, Ctx: Send + Sync> {
     /// "declared empty" share one fail-closed code path instead of an empty
     /// set silently meaning "unrestricted", as it used to (I-9)).
     pub(crate) allowed_tools: Option<HashSet<String>>,
+    /// The resolved definition's pattern rules, stacked on the harness
+    /// policy's by the loop's tool gate.
+    pub(crate) tool_rules: Option<tinytools::ToolRules>,
     /// Per-turn ordered, nonblocking projection to the optional progress sink.
     pub(crate) progress: Option<super::agent::ProgressSender>,
     /// The exact invocation-local runtime inherited by authorized children.
@@ -73,6 +76,7 @@ impl<State: Send + Sync, Ctx: Send + Sync> Clone for HostInvocationBinding<State
             model_pin: self.model_pin.clone(),
             role: self.role.clone(),
             allowed_tools: self.allowed_tools.clone(),
+            tool_rules: self.tool_rules.clone(),
             progress: self.progress.clone(),
             runtime: self.runtime.clone(),
         }
@@ -479,6 +483,13 @@ pub struct RunPolicy {
     /// to. Admission still validates arguments against the *declared* schema,
     /// which is never looser than the projected one.
     pub tool_schemas: Option<crate::tool::SchemaPreparation>,
+    /// Pattern rules deciding which tools the model may see (catalogue and
+    /// tool search) and call, evaluated in the policy's context. Stacks with
+    /// a hosted definition's own rules and its exact `tools` allowlist; see
+    /// [`crate::tool::ToolRulePolicy`].
+    ///
+    /// The default holds no rules and admits every tool.
+    pub tool_rules: crate::tool::ToolRulePolicy,
     /// Whether the loop parses `<tool_call>`-style text-dialect markup out of
     /// an assistant's visible text under a native tool dialect (see
     /// [`RunPolicy::tool_dialect`]). A forced text dialect
@@ -732,6 +743,7 @@ impl Default for RunPolicy {
             text_dialect_recovery: TextDialectRecovery::default(),
             discovery: crate::tool::discover::ToolDiscoveryPolicy::default(),
             tool_schemas: None,
+            tool_rules: crate::tool::ToolRulePolicy::default(),
             output_retry: OutputRetryPolicy::default(),
             end_strategy: EndStrategy::default(),
             structured_strategy_override: None,

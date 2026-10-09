@@ -1074,6 +1074,7 @@ impl<State: Send + Sync + 'static, Ctx: Send + Sync + 'static> AgentHarness<Stat
         let declared_tools: std::collections::HashSet<String> =
             definition.tools.into_iter().collect();
         let allowed_tools = (!declared_tools.is_empty()).then_some(declared_tools);
+        let tool_rules = definition.tool_rules;
         Ok(PreparedAgentTurn {
             binding: HostInvocationBinding {
                 host: host.clone(),
@@ -1081,6 +1082,7 @@ impl<State: Send + Sync + 'static, Ctx: Send + Sync + 'static> AgentHarness<Stat
                 model_pin: definition.model,
                 role: definition.role,
                 allowed_tools,
+                tool_rules,
                 progress: progress.clone(),
                 runtime: None,
             },
