@@ -160,7 +160,12 @@ pub fn spawn_status_watcher_with_completions(
         // Before the write, a requested cancel would be overwritten by it; after
         // it, a cancel that won the race leaves the record cancelled.
         let cancelled_before = cancelled_now();
-        record_status_with_retries(store.as_ref(), &task_id, &terminal);
+        // A failed ledger write is logged, not fatal: the completion store is
+        // independent, and the parent should hear about a finished child even
+        // if the task ledger lags (restart reconciliation settles that record).
+        if !record_status_with_retries(store.as_ref(), &task_id, &terminal) {
+            tracing::warn!("{LOG_PREFIX} task_id={task_id} terminal status not written to ledger");
+        }
         if cancelled_before || cancelled_now() {
             tracing::debug!("{LOG_PREFIX} task_id={task_id} cancelled; not recorded");
             return;

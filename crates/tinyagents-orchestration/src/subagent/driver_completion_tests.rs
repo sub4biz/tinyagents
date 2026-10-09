@@ -376,3 +376,32 @@ async fn truncation_metadata_reaches_the_completion() {
         .unwrap();
     assert!(router.pending_for("p")[0].result.omitted_chars > 0);
 }
+
+#[test]
+fn the_overflow_artifact_is_the_one_a_completion_names() {
+    let origin_task = SubagentTaskKey {
+        root_run_id: "r".into(),
+        parent_run_id: "pr".into(),
+        thread_id: Some("p".into()),
+        task_id: "t1".into(),
+    };
+    let prepared = PreparedSubagent::new(
+        "t1",
+        "worker",
+        vec![],
+        ToolSnapshot::new(vec![]).unwrap(),
+        RunContext::new(RunConfig::new("c"), String::new()),
+    )
+    .with_notify_mode(NotifyMode::Off);
+    let origin = completion::CompletionOrigin::new(&origin_task, &prepared).unwrap();
+    let mut outcome = SubagentOutcome::completed("t1", "preview");
+    for id in ["pre-existing", "overflow"] {
+        outcome.artifacts.push(ArtifactReference {
+            id: id.into(),
+            ..Default::default()
+        });
+    }
+    let record = origin.record_for_outcome(&outcome, 9).unwrap();
+    assert_eq!(record.result.artifact.unwrap().id, "overflow");
+    assert_eq!(record.parent_key, "p");
+}

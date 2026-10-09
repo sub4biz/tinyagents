@@ -20,12 +20,13 @@ pub(super) fn record_status_with_retries(
     store: &dyn TaskStore,
     task_id: &str,
     status: &DetachedSubagentStatus,
-) {
+) -> bool {
     for _ in 0..STATUS_WRITE_ATTEMPTS {
         if record_status(store, task_id, status).is_ok() {
-            return;
+            return true;
         }
     }
+    false
 }
 
 /// Record a freshly-spawned subagent in `store` (`Pending` then `Running`).
