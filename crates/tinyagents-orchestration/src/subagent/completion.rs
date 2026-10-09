@@ -48,7 +48,12 @@ pub(crate) struct CompletionOrigin {
 }
 
 impl CompletionOrigin {
-    pub(crate) fn new<C>(task_key: &SubagentTaskKey, prepared: &PreparedSubagent<C>) -> Self {
+    /// `None` when the spawn did not ask to be recorded.
+    pub(crate) fn new<C>(
+        task_key: &SubagentTaskKey,
+        prepared: &PreparedSubagent<C>,
+    ) -> Option<Self> {
+        let notify_mode = prepared.notify_mode?;
         // The thread outlives a restart; the parent run id does not, so it is
         // only the fallback for a thread-less parent.
         let parent_key = prepared
@@ -56,12 +61,12 @@ impl CompletionOrigin {
             .clone()
             .or_else(|| task_key.thread_id.clone())
             .unwrap_or_else(|| task_key.parent_run_id.clone());
-        Self {
+        Some(Self {
             task_id: task_key.task_id.clone(),
             parent_key,
             agent_id: prepared.agent_key.clone(),
-            notify_mode: prepared.notify_mode,
-        }
+            notify_mode,
+        })
     }
 
     fn record(&self, status: CompletionStatus, result: CompletionResult) -> CompletionRecord {
@@ -97,14 +102,6 @@ impl CompletionOrigin {
             artifact: outcome.artifacts.first().map(CompletionArtifact::from),
         };
         Some(self.record(status, result))
-    }
-
-    /// The record for a child whose executor failed after launch.
-    pub(crate) fn record_for_error(&self, error: &SubagentError) -> CompletionRecord {
-        self.record(
-            CompletionStatus::Failed,
-            CompletionResult::text(error.to_string()),
-        )
     }
 }
 

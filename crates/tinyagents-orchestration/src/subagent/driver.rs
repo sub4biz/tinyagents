@@ -169,8 +169,11 @@ impl<C: Send + 'static, H: Send + 'static> SubagentDriver<C, H> {
     ///
     /// Only the invocation that wins the durable terminal write records, so a
     /// coalesced follower or a replayed terminal never produces a second
-    /// completion. A cancellation is not recorded (the parent asked for it) and
-    /// neither is a pause (the same task completes later). A failure to record
+    /// completion. Only a spawn that set a notify mode is recorded. A
+    /// cancellation is not recorded (the parent asked for it), neither is a
+    /// pause (the same task completes later), nor an executor error (nothing
+    /// terminal was persisted, so the task may be re-run; the caller of `run`
+    /// has the error). A failure to record
     /// is logged and never fails the run. Without this call the driver behaves
     /// exactly as before.
     pub fn with_completion_router(mut self, router: Arc<CompletionRouter>) -> Self {
@@ -391,7 +394,7 @@ impl<C: Send + 'static, H: Send + 'static> SubagentDriver<C, H> {
         let completion_origin = self
             .completions
             .as_ref()
-            .map(|_| CompletionOrigin::new(&task_key, &prepared));
+            .and_then(|_| CompletionOrigin::new(&task_key, &prepared));
         let mut attempts = AttemptSource::from_prepared(&prepared);
         let mut attempt = 0usize;
         let mut execution = SubagentExecution {
@@ -471,12 +474,7 @@ impl<C: Send + 'static, H: Send + 'static> SubagentDriver<C, H> {
             }
             Err(SubagentError::Cancelled) => SubagentOutcome::cancelled(task_id),
             Err(_) if cancellation.is_cancelled() => SubagentOutcome::cancelled(task_id),
-            Err(error) => {
-                if let (Some(router), Some(origin)) = (&self.completions, &completion_origin) {
-                    deliver(router, origin.record_for_error(&error)).await;
-                }
-                return Err(error);
-            }
+            Err(error) => return Err(error),
         };
         let result = self
             .persist(task_key, outcome, expected_pause, &cancellation)
