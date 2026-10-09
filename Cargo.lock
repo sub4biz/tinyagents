@@ -1905,6 +1905,7 @@ dependencies = [
  "tinyinference-llm",
  "tinytools",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
