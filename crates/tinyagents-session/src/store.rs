@@ -8,6 +8,11 @@
 //! ([`super::migrations`]) and the busy-timeout/WAL/foreign-key pragmas
 //! ([`prepare_connection`]) are applied uniformly on every path into the
 //! database.
+//!
+//! The connection is the tinystoragedrivers SQLite driver's (native mode),
+//! which runs WAL with `synchronous = NORMAL`: commits survive a process
+//! crash, but an OS crash or power loss can roll back the most recent ones
+//! (the database stays consistent). See the crate README's durability note.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
