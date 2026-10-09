@@ -163,15 +163,13 @@ nothing. Recorded:
   failing and is not recorded.
 
 Not recorded: a pause (`AwaitingInput`). It is not terminal, so nothing is
-recorded until the resume that finishes the same task id, which records once
-(the durable terminal write is what is recorded). For the same reason an error
+recorded until the resume that finishes the same task id, which records once. For the same reason an error
 while resuming a paused task is not recorded: its pause is still durable. The
 router keeps the first record per task id, so a task re-run under the same id
 after a recorded failure or cancellation does not add a second completion; use a
 fresh task id to run it again. Without a router, or without a notify mode, none
 of this applies and behaviour is unchanged. A router failure is logged, never
-raised. With no router configured the
-driver is unchanged. Detached children tracked by a status channel use
+raised. Detached children tracked by a status channel use
 `spawn_status_watcher_with_completions` (see `detached/README.md`), which keeps
 watching across a pause and skips a child whose ledger shows a cancellation.
 

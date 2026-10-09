@@ -52,6 +52,17 @@
 //! defaults to [`tinyagents_harness::runtime::LoopExecution::Direct`], so
 //! every existing caller is unaffected unless it opts in.
 //!
+//! # Lifecycle events
+//!
+//! The node bodies announce `TurnStarted`, `TurnCompleted` and
+//! `MessageAppended` at the same points as the direct loop, through
+//! [`tinyagents_harness::agent_loop::phases`]'s `lifecycle_*` functions: pending
+//! appends and the turn open right before `ModelStarted`, the assistant reply
+//! after the model call, the tool results (and the turn close) after a tool
+//! batch, and the final close in `settle`. The transcript present at the first
+//! `plan` activation is the seed and is never announced. Nested tool calls never
+//! reach the transcript, so they never produce `MessageAppended`.
+//!
 //! # Tool batch execution shape
 //!
 //! The `tools` node runs a turn's whole tool-call batch in one node

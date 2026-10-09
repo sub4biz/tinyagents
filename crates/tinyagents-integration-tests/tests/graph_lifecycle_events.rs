@@ -80,7 +80,10 @@ fn lifecycle(events: &[AgentEvent]) -> Vec<String> {
                 ..
             } => Some(format!(
                 "append:{index}:{role}:{}",
-                call_id.as_ref().map(ToString::to_string).unwrap_or_default()
+                call_id
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_default()
             )),
             _ => None,
         })
@@ -134,9 +137,19 @@ async fn a_tool_run_announces_each_message_once_and_closes_each_turn() {
     let mut indices: Vec<&String> = graph.iter().filter(|e| e.starts_with("append:")).collect();
     let total = indices.len();
     indices.dedup();
-    assert_eq!(indices.len(), total, "no duplicate MessageAppended: {graph:?}");
-    assert!(!graph.iter().any(|e| e.starts_with("append:0:")), "{graph:?}");
-    assert!(graph.iter().any(|e| e == "turn.completed:1:call-1"), "{graph:?}");
+    assert_eq!(
+        indices.len(),
+        total,
+        "no duplicate MessageAppended: {graph:?}"
+    );
+    assert!(
+        !graph.iter().any(|e| e.starts_with("append:0:")),
+        "{graph:?}"
+    );
+    assert!(
+        graph.iter().any(|e| e == "turn.completed:1:call-1"),
+        "{graph:?}"
+    );
 }
 
 #[tokio::test]
@@ -152,7 +165,10 @@ async fn a_steering_injected_message_is_announced_like_the_direct_loop() {
         )
         .await
     };
-    assert_eq!(run(LoopExecution::Graph).await, run(LoopExecution::Direct).await);
+    assert_eq!(
+        run(LoopExecution::Graph).await,
+        run(LoopExecution::Direct).await
+    );
 }
 
 /// A tool that calls another tool through the harness.
@@ -241,12 +257,21 @@ async fn iter_stepping_announces_appends_once_and_never_the_input() {
     iter.run_to_end().await.expect("finishes");
 
     let events = lifecycle(&recorder.events());
-    assert!(!events.iter().any(|e| e.starts_with("append:0:")), "{events:?}");
+    assert!(
+        !events.iter().any(|e| e.starts_with("append:0:")),
+        "{events:?}"
+    );
     let appended: Vec<&String> = events.iter().filter(|e| e.starts_with("append:")).collect();
     assert_eq!(appended.len(), 3, "assistant, tool, assistant: {events:?}");
     assert_eq!(
-        events.iter().filter(|e| e.starts_with("turn.started")).count(),
-        events.iter().filter(|e| e.starts_with("turn.completed")).count(),
+        events
+            .iter()
+            .filter(|e| e.starts_with("turn.started"))
+            .count(),
+        events
+            .iter()
+            .filter(|e| e.starts_with("turn.completed"))
+            .count(),
         "{events:?}"
     );
 }

@@ -539,7 +539,9 @@ impl crate::summarization::Summarizer for RejectingSummarizer {
         &self,
         _: &[Message],
     ) -> crate::error::Result<crate::summarization::SummaryRecord> {
-        Err(TinyAgentsError::Validation("rejected before dispatch".into()))
+        Err(TinyAgentsError::Validation(
+            "rejected before dispatch".into(),
+        ))
     }
 }
 
@@ -549,7 +551,10 @@ fn long_input() -> Vec<Message> {
         input.push(Message::user(format!("question {i} {}", "x".repeat(400))));
         input.push(Message::Assistant(AssistantMessage {
             id: None,
-            content: vec![ContentBlock::Text(format!("answer {i} {}", "y".repeat(400)))],
+            content: vec![ContentBlock::Text(format!(
+                "answer {i} {}",
+                "y".repeat(400)
+            ))],
             tool_calls: Vec::new(),
             usage: None,
             origin: None,
@@ -559,9 +564,7 @@ fn long_input() -> Vec<Message> {
     input
 }
 
-fn aborting_harness(
-    summarizer: Box<dyn crate::summarization::Summarizer>,
-) -> AgentHarness<()> {
+fn aborting_harness(summarizer: Box<dyn crate::summarization::Summarizer>) -> AgentHarness<()> {
     use crate::middleware::{CompressionFailurePolicy, ContextCompressionMiddleware};
     let policy = crate::summarization::SummarizationPolicy {
         keep_last: 2,
@@ -580,7 +583,8 @@ fn aborting_harness(
 
 #[tokio::test]
 async fn a_summarizer_that_dispatched_and_failed_without_usage_marks_provider_started() {
-    let summarizer = crate::summarization::ModelSummarizer::new(Arc::new(FailingModel("boom")), "m");
+    let summarizer =
+        crate::summarization::ModelSummarizer::new(Arc::new(FailingModel("boom")), "m");
     let harness = aborting_harness(Box::new(summarizer));
     let ctx = RunContext::new(RunConfig::new("sum-dispatched"), ());
     let partial = harness
