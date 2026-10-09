@@ -300,6 +300,22 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
         ))
     }
 
+    /// The tool rules' answer for a model call of `name` with `args`.
+    ///
+    /// An unregistered or allowlist-excluded name is admitted here with no
+    /// directive: it is not a tool the rules can describe, and the
+    /// unknown-tool policy answers it below.
+    fn rule_admission(&self, gate: &ToolGate, name: &str, args: &serde_json::Value) -> CallGate {
+        match gate
+            .allows_name(name)
+            .then(|| self.tools.model_dispatch(name))
+            .flatten()
+        {
+            Some(dispatch) => gate.admit_call(dispatch.tool().as_ref(), args),
+            None => CallGate::Admit(tinytools::ApprovalDirective::Default),
+        }
+    }
+
     /// Builds the run's deferred-tool catalogue: every
     /// [`tinytools::ToolExposure::Deferred`] registration the gate lets the
     /// model search for, or an empty catalogue when discovery is disabled.
@@ -600,22 +616,17 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
         // unknown-tool policy below) and any target it dispatches to, on the
         // raw provider arguments the host gate also sees.
         let gate = self.resolve_tool_gate(ctx)?;
-        let mut rule_approval = tinytools::ApprovalDirective::Default;
-        if gate.allows_name(&call.name)
-            && let Some(dispatch) = self.tools.model_dispatch(&call.name)
-        {
-            match gate.admit_call(dispatch.tool().as_ref(), &model_arguments) {
-                CallGate::Admit(approval) => rule_approval = approval,
-                CallGate::Refuse(message) => {
-                    ctx.limits.rollback_tool_calls(1);
-                    return Ok(ResolvedToolCall::Answered(with_refusal_metadata(
-                        ctx,
-                        &call.id,
-                        tinytools::ToolResult::error(message),
-                    )));
-                }
+        let mut rule_approval = match self.rule_admission(&gate, &call.name, &model_arguments) {
+            CallGate::Admit(approval) => approval,
+            CallGate::Refuse(message) => {
+                ctx.limits.rollback_tool_calls(1);
+                return Ok(ResolvedToolCall::Answered(with_refusal_metadata(
+                    ctx,
+                    &call.id,
+                    tinytools::ToolResult::error(message),
+                )));
             }
-        }
+        };
 
         // The slot is *reserved* above (cap-first, so a middleware hook never
         // runs for a call the budget has already refused) and *released* here
@@ -680,6 +691,19 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
             status.set_last_event(record.id);
             call.arguments = repaired;
             call.invalid = None;
+            // The rules first saw an unparseable string, which names no
+            // indirect target and matches no argument condition; decide again
+            // on what will actually run.
+            match self.rule_admission(&gate, &call.name, &call.arguments) {
+                CallGate::Admit(approval) => rule_approval = rule_approval.strictest(approval),
+                CallGate::Refuse(message) => {
+                    return Ok(ResolvedToolCall::Answered(with_refusal_metadata(
+                        ctx,
+                        &call.id,
+                        tinytools::ToolResult::error(message),
+                    )));
+                }
+            }
         }
 
         // The provider marked this call's arguments unparseable (a small local
@@ -746,18 +770,22 @@ impl<State: Send + Sync, Ctx: Send + Sync> AgentHarness<State, Ctx> {
                     UnknownToolPolicy::Rewrite { tool_name } => self
                         .tools
                         .dispatch(tool_name)
-                        .filter(|dispatch| {
-                            gate.allows_name(tool_name)
-                                && matches!(
-                                    gate.admit_call(dispatch.tool().as_ref(), &arguments),
-                                    CallGate::Admit(_)
-                                )
-                        })
-                        .map(|dispatch| (tool_name.clone(), dispatch)),
+                        .filter(|_| gate.allows_name(tool_name))
+                        .and_then(|dispatch| {
+                            match gate.admit_call(dispatch.tool().as_ref(), &arguments) {
+                                CallGate::Admit(approval) => {
+                                    Some((tool_name.clone(), dispatch, approval))
+                                }
+                                CallGate::Refuse(_) => None,
+                            }
+                        }),
                     _ => None,
                 };
 
-                if let Some((tool_name, dispatch)) = rewrite_target {
+                if let Some((tool_name, dispatch, approval)) = rewrite_target {
+                    // The rewrite target's own rules decide its approval, not
+                    // the unknown name's.
+                    rule_approval = approval;
                     call.name = tool_name.clone();
                     let record = ctx.emit(AgentEvent::UnknownToolCall {
                         call_id,
