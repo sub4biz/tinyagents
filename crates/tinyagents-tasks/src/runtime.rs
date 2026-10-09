@@ -92,27 +92,14 @@ where
         cancellation: CancellationToken,
         abort: AbortHandle,
     ) -> Result<()> {
-        if self.len().map_err(Self::tinyagents_error)? >= self.soft_cap {
-            self.sweep_terminal().map_err(Self::tinyagents_error)?;
-        }
-        let mut guard = self.lock().map_err(Self::tinyagents_error)?;
-        if guard.contains_key(&task_id) {
-            return Err(TinyAgentsError::DuplicateComponent(format!(
-                "detached task runtime `{task_id}`"
-            )));
-        }
-        guard.insert(
+        self.register_entry(
             task_id,
-            DetachedTaskEntry {
-                owner_id: owner_id.into(),
-                metadata,
-                status,
-                cancellation: Some(cancellation),
-                abort: Some(abort),
-                steer_requests: RecentRequestIds::default(),
-            },
-        );
-        Ok(())
+            owner_id.into(),
+            metadata,
+            status,
+            cancellation,
+            Some(abort),
+        )
     }
 
     /// Registers a task that is stopped only cooperatively: it owns no spawned
@@ -126,6 +113,25 @@ where
         status: watch::Receiver<Status>,
         cancellation: CancellationToken,
     ) -> Result<()> {
+        self.register_entry(
+            task_id,
+            owner_id.into(),
+            metadata,
+            status,
+            cancellation,
+            None,
+        )
+    }
+
+    fn register_entry(
+        &self,
+        task_id: TaskId,
+        owner_id: String,
+        metadata: Metadata,
+        status: watch::Receiver<Status>,
+        cancellation: CancellationToken,
+        abort: Option<AbortHandle>,
+    ) -> Result<()> {
         if self.len().map_err(Self::tinyagents_error)? >= self.soft_cap {
             self.sweep_terminal().map_err(Self::tinyagents_error)?;
         }
@@ -138,11 +144,11 @@ where
         guard.insert(
             task_id,
             DetachedTaskEntry {
-                owner_id: owner_id.into(),
+                owner_id,
                 metadata,
                 status,
                 cancellation: Some(cancellation),
-                abort: None,
+                abort,
                 steer_requests: RecentRequestIds::default(),
             },
         );

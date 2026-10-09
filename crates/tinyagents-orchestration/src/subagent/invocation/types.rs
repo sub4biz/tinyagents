@@ -297,7 +297,11 @@ pub(crate) struct JobLink {
 /// cancel-then-settle protocol, and retention of settled jobs.
 #[derive(Clone)]
 pub struct SubAgentJobRegistry {
-    pub(crate) tasks: DetachedTaskRegistry<JobMeta, SubAgentJob>,
+    // Private to `jobs.rs`. Invariant: only cooperative calls (register,
+    // cancel_cooperative, release_cancellation, snapshots) may touch it, under
+    // `controls`. Its removing APIs (`cancel`, `wait`, `sweep_terminal`) would
+    // drop settled jobs, which must stay queryable.
+    pub(super) tasks: DetachedTaskRegistry<JobMeta, SubAgentJob>,
     pub(crate) steering: SteeringRegistry,
     /// Status senders and cancel flags. Also the transition gate: every
     /// mutation holds this lock, so a settle and a cancel never interleave.

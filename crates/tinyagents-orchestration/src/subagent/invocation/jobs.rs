@@ -71,7 +71,7 @@ impl SubAgentJobRegistry {
     }
 
     /// Whether the job still holds a live (unreleased) cancellation token.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn holds_live_cancellation(&self, id: &SubAgentJobId) -> bool {
         self.tasks
             .holds_cancellation(&TaskId::new(id.as_str()))
@@ -112,15 +112,10 @@ impl SubAgentJobRegistry {
         let (status, watcher) = watch::channel(job);
         let mut controls = self.controls();
         self.steering.register(task_id.clone(), steering.clone());
-        if let Err(error) = self.tasks.register_cooperative(
-            task_id,
-            owner.to_string(),
-            JobMeta,
-            watcher,
-            cancellation,
-        ) {
-            tracing::error!("{LOG_PREFIX} register.failed job_id={id} error={error}");
-        }
+        // Ids are unique, so registration can only fail on a poisoned lock.
+        self.tasks
+            .register_cooperative(task_id, owner.to_string(), JobMeta, watcher, cancellation)
+            .expect("subagent job registration");
         controls.insert(
             id.clone(),
             JobControl {
@@ -396,6 +391,10 @@ impl SubAgentJobRegistry {
         if control.cancellation_requested {
             return Err(SubAgentJobError::Cancelling(job_id.to_owned()));
         }
+        let handle = self
+            .tasks
+            .steering_handle(&task_id, &owner)
+            .map_err(|_| not_found())?;
         if let Some(request_id) = request_id {
             match self.tasks.claim_steer_request(&task_id, request_id) {
                 Ok(false) => {
@@ -409,12 +408,9 @@ impl SubAgentJobRegistry {
                 Err(_) => return Err(not_found()),
             }
         }
-        self.tasks
-            .steering_handle(&task_id, &owner)
-            .map_err(|_| not_found())?
-            .send(SteeringCommand::InjectMessage(Message::user(
-                message.into(),
-            )));
+        handle.send(SteeringCommand::InjectMessage(Message::user(
+            message.into(),
+        )));
         Ok(false)
     }
 

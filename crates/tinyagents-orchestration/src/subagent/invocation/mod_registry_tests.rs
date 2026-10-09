@@ -52,3 +52,59 @@ async fn terminal_jobs_survive_many_registrations() {
     assert!(ids.iter().all(|id| jobs.get(id.as_str()).is_some()));
     assert_eq!(jobs.list().len(), 2_000);
 }
+
+#[tokio::test]
+async fn control_errors_keep_their_documented_order() {
+    let jobs = SubAgentJobRegistry::new();
+    let (live, _s) = jobs.create("worker", 1);
+    let (done, _s2) = jobs.create("worker", 1);
+    jobs.mark_result(&done, Err(TinyAgentsError::Cancelled));
+    let not_found = |id: &str| SubAgentJobError::NotFound(id.to_owned());
+
+    // Unknown id and foreign owner are both NotFound, even for a settled job.
+    assert_eq!(jobs.cancel_owned("nope", 1).unwrap_err(), not_found("nope"));
+    assert_eq!(
+        jobs.cancel_owned(live.as_str(), 2).unwrap_err(),
+        not_found(live.as_str())
+    );
+    assert_eq!(
+        jobs.cancel_owned(done.as_str(), 2).unwrap_err(),
+        not_found(done.as_str())
+    );
+    assert_eq!(
+        jobs.send_message_with_request_id(done.as_str(), 2, "m", None)
+            .unwrap_err(),
+        not_found(done.as_str())
+    );
+    // Own settled job is Terminal.
+    let terminal = SubAgentJobError::Terminal {
+        job_id: done.as_str().to_owned(),
+        status: SubAgentJobStatus::Cancelled,
+    };
+    assert_eq!(
+        jobs.cancel_owned(done.as_str(), 1).unwrap_err(),
+        terminal.clone()
+    );
+    assert_eq!(
+        jobs.send_message_with_request_id(done.as_str(), 1, "m", None)
+            .unwrap_err(),
+        terminal
+    );
+    // An oversized id on a live job is RequestIdTooLong...
+    let long = "x".repeat(10_000);
+    assert_eq!(
+        jobs.send_message_with_request_id(live.as_str(), 1, "m", Some(&long))
+            .unwrap_err(),
+        SubAgentJobError::RequestIdTooLong
+    );
+    // ...but a cancelling job reports Cancelling before the id is looked at.
+    jobs.cancel_owned(live.as_str(), 1).unwrap();
+    let cancelling = SubAgentJobError::Cancelling(live.as_str().to_owned());
+    assert_eq!(
+        jobs.send_message_with_request_id(live.as_str(), 1, "m", Some(&long))
+            .unwrap_err(),
+        cancelling
+    );
+    // Repeated cancels of a cancelling job stay Ok.
+    assert!(jobs.cancel_owned(live.as_str(), 1).is_ok());
+}
