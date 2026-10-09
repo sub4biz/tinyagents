@@ -362,7 +362,7 @@ async fn release_cancellation_drops_the_token_without_cancelling_it() {
             cancellation.clone(),
         )
         .unwrap();
-    registry.release_cancellation(&task_id).unwrap();
+    registry.release_cancellation_trusted(&task_id).unwrap();
     assert!(!registry.holds_cancellation(&task_id).unwrap());
     assert!(!cancellation.is_cancelled());
     // Hard cancel still works on an entry that holds no abort handle.

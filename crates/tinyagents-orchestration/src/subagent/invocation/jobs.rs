@@ -153,7 +153,7 @@ impl SubAgentJobRegistry {
             return false;
         }
         let task_id = TaskId::new(id.as_str());
-        let _ = self.tasks.release_cancellation(&task_id);
+        let _ = self.tasks.release_cancellation_trusted(&task_id);
         let cancellation_requested = control.cancellation_requested;
         control
             .status
@@ -318,32 +318,45 @@ impl SubAgentJobRegistry {
     ///
     /// Model-visible tools must use the run-scoped dispatch path instead.
     pub fn get(&self, job_id: &str) -> Option<SubAgentJob> {
-        self.tasks
-            .snapshot_trusted(&TaskId::new(job_id))
-            .ok()
-            .map(|snapshot| snapshot.status)
+        match self.tasks.snapshot_trusted(&TaskId::new(job_id)) {
+            Ok(snapshot) => Some(snapshot.status),
+            Err(DetachedTaskRegistryError::Unknown) => None,
+            Err(error) => {
+                tracing::warn!("{LOG_PREFIX} get.registry_error job_id={job_id} error={error}");
+                None
+            }
+        }
     }
 
     /// Returns this run's jobs in stable id order.
     fn list_owned(&self, owner: u64) -> Vec<SubAgentJob> {
-        self.tasks
-            .snapshots(Some(&owner.to_string()))
-            .unwrap_or_default()
-            .into_iter()
-            .map(|snapshot| snapshot.status)
-            .collect()
+        Self::sorted(self.tasks.snapshots(Some(&owner.to_string())))
     }
 
     /// Returns every job for trusted host-side supervision.
     ///
     /// Model-visible tools must use the run-scoped dispatch path instead.
     pub fn list(&self) -> Vec<SubAgentJob> {
-        self.tasks
-            .snapshots(None)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|snapshot| snapshot.status)
-            .collect()
+        Self::sorted(self.tasks.snapshots(None))
+    }
+
+    /// Jobs in stable id order, independent of the detached registry's own
+    /// iteration order. A registry failure is logged, never silent.
+    fn sorted(
+        snapshots: Result<
+            Vec<tinyagents_tasks::DetachedTaskSnapshot<JobMeta, SubAgentJob>>,
+            DetachedTaskRegistryError,
+        >,
+    ) -> Vec<SubAgentJob> {
+        let mut jobs: Vec<SubAgentJob> = match snapshots {
+            Ok(snapshots) => snapshots.into_iter().map(|s| s.status).collect(),
+            Err(error) => {
+                tracing::warn!("{LOG_PREFIX} list.registry_error error={error}");
+                Vec::new()
+            }
+        };
+        jobs.sort_by(|left, right| left.id.0.cmp(&right.id.0));
+        jobs
     }
 
     /// Queues a user message for delivery at the running child's next safe

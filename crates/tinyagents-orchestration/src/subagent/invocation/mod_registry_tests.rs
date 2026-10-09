@@ -108,3 +108,16 @@ async fn control_errors_keep_their_documented_order() {
     // Repeated cancels of a cancelling job stay Ok.
     assert!(jobs.cancel_owned(live.as_str(), 1).is_ok());
 }
+
+#[tokio::test]
+async fn listings_are_sorted_by_job_id() {
+    let jobs = SubAgentJobRegistry::new();
+    for _ in 0..40 {
+        jobs.create("worker", 1);
+    }
+    let all: Vec<String> = jobs.list().into_iter().map(|j| j.id.0).collect();
+    let mut sorted = all.clone();
+    sorted.sort();
+    assert_eq!(all, sorted);
+    assert_eq!(all.len(), 40);
+}

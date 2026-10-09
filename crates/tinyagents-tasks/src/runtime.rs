@@ -184,9 +184,10 @@ where
         Ok(Self::snapshot_entry(task_id, entry))
     }
 
-    /// Drops a task's cancellation token without cancelling it, for executors
-    /// that settle a task and no longer need to hold a live token.
-    pub fn release_cancellation(
+    /// Trusted-control (no owner check, like [`Self::snapshot_trusted`]): drops
+    /// a task's cancellation token without cancelling it, for the executor that
+    /// settles the task and no longer needs to hold a live token.
+    pub fn release_cancellation_trusted(
         &self,
         task_id: &TaskId,
     ) -> std::result::Result<(), DetachedTaskRegistryError> {
