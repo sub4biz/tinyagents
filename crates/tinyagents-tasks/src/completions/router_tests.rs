@@ -197,10 +197,12 @@ async fn followup_mode_pushes_onto_the_followup_lane_of_a_live_parent() {
     );
     let pushed = q.drain(QueueLane::Followup).await;
     assert!(format!("{:?}", pushed[0]).contains("t1"));
-    assert!(
-        router.pending_for("p").is_empty(),
-        "handed to the live queue"
-    );
+    // Pushed but not acknowledged: still pending, leased, not claimable.
+    assert_eq!(router.in_flight_for("p").len(), 1);
+    assert!(router.claim_pending("p", 10).unwrap().is_empty());
+    router.mark_delivered(&["t1"]).unwrap();
+    assert!(router.pending_for("p").is_empty());
+    assert!(router.in_flight_for("p").is_empty());
 }
 
 #[tokio::test]
@@ -396,4 +398,43 @@ async fn a_custom_formatter_frames_the_pushed_message() {
     router.record(record("t1", "p")).await.unwrap();
     let pushed = q.drain(QueueLane::Followup).await;
     assert!(format!("{:?}", pushed[0]).contains("background_agent_result count=1"));
+}
+
+#[tokio::test]
+async fn a_push_lost_with_the_queue_is_redelivered() {
+    let router = router();
+    let q = queue();
+    router.attach_parent("p", q.clone());
+    router.record(record("t1", "p")).await.unwrap();
+    q.clear().await;
+    router.detach_parent("p");
+    let batch = router.claim_pending("p", 10).unwrap();
+    assert_eq!(ids(&batch), ["t1"]);
+    assert_eq!(batch[0].attempts, 2, "the lost push counted as attempt one");
+}
+
+#[tokio::test]
+async fn release_makes_an_abandoned_claim_claimable_again() {
+    let router = router();
+    router.record(record("t1", "p")).await.unwrap();
+    router.claim_pending("p", 1).unwrap();
+    assert!(router.claim_pending("p", 1).unwrap().is_empty());
+    router.release(&["t1"]);
+    assert_eq!(router.claim_pending("p", 1).unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn recovery_note_skips_pull_only_and_leased_records() {
+    let router = router();
+    router
+        .record(record("off", "p").with_notify_mode(NotifyMode::Off))
+        .await
+        .unwrap();
+    router.record(record("leased", "p")).await.unwrap();
+    router.claim_pending("p", 1).unwrap();
+    router.record(record("open", "p")).await.unwrap();
+    let note = router.restart_recovery_note("p", &[]);
+    assert!(note.contains("result of open"));
+    assert!(!note.contains("result of off"));
+    assert!(!note.contains("result of leased"));
 }

@@ -159,3 +159,36 @@ async fn a_paused_child_records_nothing() {
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert!(router.pending_for("p").is_empty());
 }
+
+#[tokio::test]
+async fn a_cancelled_child_is_not_pushed_back_to_its_parent() {
+    let router = router();
+    let store = spawned_store("t1");
+    let (tx, rx) = watch::channel(DetachedSubagentStatus::Running);
+    record_cancelled(store.as_ref(), "t1").unwrap();
+    spawn_status_watcher_with_completions(store, "t1".into(), rx, target(&router));
+    drop(tx);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(router.pending_for("p").is_empty());
+}
+
+#[tokio::test]
+async fn a_resumed_child_is_recorded_when_it_finally_finishes() {
+    let router = router();
+    let store = spawned_store("t1");
+    let (tx, rx) = watch::channel(DetachedSubagentStatus::Running);
+    spawn_status_watcher_with_completions(store, "t1".into(), rx, target(&router));
+    tx.send(DetachedSubagentStatus::AwaitingUser {
+        question: "which?".into(),
+    })
+    .unwrap();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(router.pending_for("p").is_empty());
+    tx.send(DetachedSubagentStatus::Completed {
+        output: "answered".into(),
+        iterations: 2,
+    })
+    .unwrap();
+    settle(&router, "p").await;
+    assert_eq!(router.pending_for("p")[0].result.text, "answered");
+}

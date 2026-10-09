@@ -10,8 +10,10 @@
 
 use std::sync::Arc;
 
+use tinyagents_harness::ids::TaskId;
 use tinyagents_tasks::{
-    CompletionRecord, CompletionResult, CompletionRouter, CompletionStatus, NotifyMode, TaskStore,
+    CompletionRecord, CompletionResult, CompletionRouter, CompletionStatus, NotifyMode,
+    OrchestrationTaskStatus, TaskStore,
 };
 use tokio::sync::watch;
 
@@ -120,8 +122,15 @@ pub async fn record_detached_completion(
 }
 
 /// Like [`spawn_status_watcher`](super::spawn_status_watcher), and additionally
-/// records the first terminal status with `target`'s router after it is
-/// mirrored into `store`. A dropped sender is a failed completion.
+/// records the first final status with `target`'s router after it is mirrored
+/// into `store`.
+///
+/// A pause (`AwaitingUser`) is mirrored into the store and the watcher keeps
+/// waiting, so a resumed child that reports on the same channel is still
+/// recorded when it finishes. A dropped sender is a failed completion unless
+/// the ledger already shows a requested or recorded cancellation: the parent
+/// asked for that, so it is not pushed back to it. (A host that aborts a child
+/// without marking the ledger should [`CompletionRouter::tombstone`] it first.)
 pub fn spawn_status_watcher_with_completions(
     store: Arc<dyn TaskStore>,
     task_id: String,
@@ -131,14 +140,26 @@ pub fn spawn_status_watcher_with_completions(
     tokio::spawn(async move {
         let terminal = loop {
             let snapshot = status.borrow_and_update().clone();
-            if snapshot.is_terminal() {
-                break snapshot;
+            match snapshot {
+                DetachedSubagentStatus::Running => {}
+                DetachedSubagentStatus::AwaitingUser { .. } => {
+                    record_status_with_retries(store.as_ref(), &task_id, &snapshot);
+                }
+                _ => break snapshot,
             }
             if status.changed().await.is_err() {
                 break DetachedSubagentStatus::ended_without_result();
             }
         };
+        let cancelled = matches!(
+            store.get(&TaskId::new(&task_id)).map(|r| r.status),
+            Some(OrchestrationTaskStatus::CancelRequested | OrchestrationTaskStatus::Cancelled)
+        );
         record_status_with_retries(store.as_ref(), &task_id, &terminal);
+        if cancelled {
+            tracing::debug!("{LOG_PREFIX} task_id={task_id} cancelled; not recorded");
+            return;
+        }
         record_detached_completion(&target, &task_id, &terminal).await;
     });
 }

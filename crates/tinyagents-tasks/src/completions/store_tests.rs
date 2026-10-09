@@ -201,3 +201,15 @@ fn in_memory_store_compacts_settled_records_only() {
     assert!(store.get("pending").is_some());
     assert!(store.get("done").is_none());
 }
+
+#[tokio::test]
+async fn the_log_stays_appendable_after_compaction_in_the_same_process() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("completions.jsonl");
+    let router = open_router(&path);
+    router.record(record("a", "p")).await.unwrap();
+    router.compact(Duration::from_secs(3600)).unwrap();
+    router.record(record("b", "p")).await.unwrap();
+    drop(router);
+    assert_eq!(open_router(&path).pending_for("p").len(), 2);
+}

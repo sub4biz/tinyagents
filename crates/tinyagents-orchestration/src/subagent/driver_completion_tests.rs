@@ -17,7 +17,7 @@ use super::*;
 type Behaviour = Arc<dyn Fn(&str) -> Result<SubagentOutcome, SubagentError> + Send + Sync>;
 
 struct Planner {
-    mode: NotifyMode,
+    mode: Option<NotifyMode>,
     parent: Option<&'static str>,
 }
 
@@ -34,8 +34,10 @@ impl SubagentPlanner<String> for Planner {
             vec![Message::user(parts.input)],
             ToolSnapshot::new(vec![]).unwrap(),
             parts.run_context,
-        )
-        .with_notify_mode(self.mode);
+        );
+        if let Some(mode) = self.mode {
+            prepared = prepared.with_notify_mode(mode);
+        }
         if let Some(parent) = self.parent {
             prepared = prepared.with_completion_parent(parent);
         }
@@ -101,7 +103,7 @@ fn request(task_id: &str) -> SubagentRequest<String> {
 }
 
 fn driver(
-    mode: NotifyMode,
+    mode: Option<NotifyMode>,
     parent: Option<&'static str>,
     behaviour: Behaviour,
 ) -> SubagentDriver<String> {
@@ -126,8 +128,8 @@ fn ok() -> Behaviour {
 #[tokio::test]
 async fn a_finished_child_is_recorded_under_its_parent() {
     let router = router();
-    let driver =
-        driver(NotifyMode::Followup, Some("thread-1"), ok()).with_completion_router(router.clone());
+    let driver = driver(Some(NotifyMode::Followup), Some("thread-1"), ok())
+        .with_completion_router(router.clone());
     driver
         .run(request("t1"), CancellationToken::new())
         .await
@@ -144,7 +146,7 @@ async fn a_finished_child_is_recorded_under_its_parent() {
 #[tokio::test]
 async fn the_parent_key_falls_back_to_the_parent_run() {
     let router = router();
-    let driver = driver(NotifyMode::Off, None, ok()).with_completion_router(router.clone());
+    let driver = driver(Some(NotifyMode::Off), None, ok()).with_completion_router(router.clone());
     driver
         .run(request("t1"), CancellationToken::new())
         .await
@@ -163,7 +165,7 @@ async fn each_notify_mode_reaches_its_lane() {
         let router = router();
         let queue: RunQueueHandle = Arc::new(RunQueue::<Message>::new());
         router.attach_parent("p", queue.clone());
-        let driver = driver(mode, Some("p"), ok()).with_completion_router(router.clone());
+        let driver = driver(Some(mode), Some("p"), ok()).with_completion_router(router.clone());
         driver
             .run(request("t1"), CancellationToken::new())
             .await
@@ -178,9 +180,11 @@ async fn each_notify_mode_reaches_its_lane() {
             }
             _ => assert_eq!(status.total, 0, "{mode:?}"),
         }
+        // A live push stays pending (leased) until the host acknowledges it.
+        assert_eq!(router.pending_for("p").len(), 1, "{mode:?}");
         assert_eq!(
-            router.pending_for("p").len(),
-            usize::from(lane.is_none()),
+            router.in_flight_for("p").len(),
+            usize::from(lane.is_some()),
             "{mode:?}"
         );
     }
@@ -193,7 +197,7 @@ async fn a_child_the_parent_already_collected_is_never_pushed() {
     router.attach_parent("p", queue.clone());
     router.tombstone("t1").unwrap();
     let driver =
-        driver(NotifyMode::Followup, Some("p"), ok()).with_completion_router(router.clone());
+        driver(Some(NotifyMode::Followup), Some("p"), ok()).with_completion_router(router.clone());
     driver
         .run(request("t1"), CancellationToken::new())
         .await
@@ -212,7 +216,7 @@ async fn an_incomplete_child_is_recorded_with_its_reason() {
         ))
     });
     let driver =
-        driver(NotifyMode::Off, Some("p"), behaviour).with_completion_router(router.clone());
+        driver(Some(NotifyMode::Off), Some("p"), behaviour).with_completion_router(router.clone());
     driver
         .run(request("t1"), CancellationToken::new())
         .await
@@ -223,16 +227,40 @@ async fn an_incomplete_child_is_recorded_with_its_reason() {
 }
 
 #[tokio::test]
-async fn an_executor_failure_is_recorded_and_still_returned() {
+async fn an_executor_failure_is_returned_and_not_recorded() {
     let router = router();
     let behaviour: Behaviour = Arc::new(|_| Err(SubagentError::Execution("boom".into())));
-    let driver =
-        driver(NotifyMode::Off, Some("p"), behaviour).with_completion_router(router.clone());
-    let result = driver.run(request("t1"), CancellationToken::new()).await;
-    assert!(result.is_err());
-    let pending = router.pending_for("p");
-    assert_eq!(pending[0].status, CompletionStatus::Failed);
-    assert!(pending[0].result.text.contains("boom"));
+    let failing =
+        driver(Some(NotifyMode::Off), Some("p"), behaviour).with_completion_router(router.clone());
+    assert!(
+        failing
+            .run(request("t1"), CancellationToken::new())
+            .await
+            .is_err()
+    );
+    assert!(router.pending_for("p").is_empty());
+    // The same task can be re-run, and its success is not shadowed.
+    let retry =
+        driver(Some(NotifyMode::Off), Some("p"), ok()).with_completion_router(router.clone());
+    retry
+        .run(request("t1"), CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(router.pending_for("p")[0].status, CompletionStatus::Success);
+}
+
+#[tokio::test]
+async fn a_spawn_without_a_notify_mode_is_not_recorded() {
+    let router = router();
+    let queue: RunQueueHandle = Arc::new(RunQueue::<Message>::new());
+    router.attach_parent("p", queue.clone());
+    let foreground = driver(None, Some("p"), ok()).with_completion_router(router.clone());
+    foreground
+        .run(request("t1"), CancellationToken::new())
+        .await
+        .unwrap();
+    assert!(router.pending_for("p").is_empty());
+    assert_eq!(queue.status().await.total, 0);
 }
 
 #[tokio::test]
@@ -247,7 +275,7 @@ async fn a_cancelled_child_is_not_recorded() {
         })
     };
     let driver =
-        driver(NotifyMode::Off, Some("p"), behaviour).with_completion_router(router.clone());
+        driver(Some(NotifyMode::Off), Some("p"), behaviour).with_completion_router(router.clone());
     let result = driver.run(request("t1"), token).await.unwrap();
     assert!(matches!(
         result.outcome.status,
@@ -259,7 +287,8 @@ async fn a_cancelled_child_is_not_recorded() {
 #[tokio::test]
 async fn a_replayed_terminal_result_is_not_recorded_again() {
     let router = router();
-    let driver = driver(NotifyMode::Off, Some("p"), ok()).with_completion_router(router.clone());
+    let driver =
+        driver(Some(NotifyMode::Off), Some("p"), ok()).with_completion_router(router.clone());
     driver
         .run(request("t1"), CancellationToken::new())
         .await
@@ -278,8 +307,8 @@ async fn a_replayed_terminal_result_is_not_recorded_again() {
 #[tokio::test]
 async fn without_a_router_the_run_is_unchanged() {
     let with_router_driver =
-        driver(NotifyMode::Followup, Some("p"), ok()).with_completion_router(router());
-    let plain = driver(NotifyMode::Followup, Some("p"), ok());
+        driver(Some(NotifyMode::Followup), Some("p"), ok()).with_completion_router(router());
+    let plain = driver(Some(NotifyMode::Followup), Some("p"), ok());
     let a = plain
         .run(request("t1"), CancellationToken::new())
         .await
